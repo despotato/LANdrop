@@ -32,6 +32,11 @@ Credential persistence adjusted: local email/password fields are now persisted i
 Panel layout lock: `My Devices` and `Other Users` remain side-by-side in desktop app layout (removed responsive single-column collapse).
 Account matching fix: server now honors portable `local:*` auth token scope even when strict auth mode is off, so same email/password devices correctly appear under `My Devices` after sign-in.
 Guest visibility refinement: non-logged-in devices can be discoverable (`Findable`) and requestable, but are never treated as the same account scope (only explicit `local:*` token matches count as same account).
+Transfer UX overhaul: sharing now uses centered modal overlays (with dimmed background) for request approval, file upload selection, incoming file acceptance, and post-transfer download confirmation; files are no longer auto-downloaded on receive.
+Sharing flow update: selecting `Share` on `My Devices` auto-establishes connection when needed (no manual pre-connect step).
+Modal UX fixes: centered modal content/actions, added explicit connection-ready state + inline upload errors, and kept `Share` action available on already-connected devices.
+Upload reliability fix: `sendFile` now waits briefly for DataChannel open before failing, and the upload CTA is disabled until `transfer.isReady()` to prevent premature sends.
+Connection-stuck fix: receiver now auto-answers offers for same-account peers by presence scope (`mine`) and for explicitly approved share requests, preventing “Connecting…” stalls after request approval.
 
 ## Planned Next Phase (Local Account Matching MVP)
 Goal: keep the UX “sign in once, see devices, send instantly” without introducing an external database service yet.

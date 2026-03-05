@@ -1,5 +1,4 @@
 import type { DeviceId, DeviceType } from "@landrop/shared";
-import { deriveSafetyPhrase } from "@landrop/shared";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getOrCreateIdentity, setDeviceName, type LocalIdentity } from "./lib/deviceIdentity.js";
 import { storageKey } from "./lib/storage.js";
@@ -20,19 +19,23 @@ const ENV_SIGNALING_HTTP = import.meta.env.VITE_SIGNALING_HTTP_URL as string | u
 const DEFAULT_SIGNALING_URL = ENV_SIGNALING_URL ?? "ws://localhost:8787";
 const DEFAULT_SIGNALING_HTTP = ENV_SIGNALING_HTTP ?? getSignalingHttpBase(DEFAULT_SIGNALING_URL);
 
-type TrustedPeer = {
-  deviceId: DeviceId;
-  name: string;
-  deviceType?: DeviceType;
-  publicKeyJwk: JsonWebKey;
-  addedAtMs: number;
-};
-
 type IncomingShareRequest = {
   requestId: string;
   from: DeviceId;
   fromName: string;
   fromDeviceType?: DeviceType;
+};
+
+type ShareTarget = {
+  deviceId: DeviceId;
+  name: string;
+  deviceType?: DeviceType;
+};
+
+type ReceivedReady = {
+  fileId: string;
+  name: string;
+  size: number;
 };
 
 const DEVICE_ICON: Record<DeviceType, string> = {
@@ -50,23 +53,6 @@ function deviceTypeLabel(deviceType?: DeviceType): string {
   if (deviceType === "ios") return "iOS";
   if (deviceType === "macos") return "macOS";
   return deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
-}
-
-function loadTrustedPeers(): Record<DeviceId, TrustedPeer> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey("trustedPeers")) ?? "{}") as Record<DeviceId, TrustedPeer>;
-    const normalized: Record<DeviceId, TrustedPeer> = {};
-    for (const [deviceId, peer] of Object.entries(parsed)) {
-      normalized[deviceId] = { ...peer, deviceType: peer.deviceType ?? "unknown" };
-    }
-    return normalized;
-  } catch {
-    return {};
-  }
-}
-
-function saveTrustedPeers(peers: Record<DeviceId, TrustedPeer>) {
-  localStorage.setItem(storageKey("trustedPeers"), JSON.stringify(peers));
 }
 
 export default function App() {
@@ -94,11 +80,13 @@ export default function App() {
   const [presence, setPresence] = useState<PresenceDevice[]>([]);
   const [incomingShareRequests, setIncomingShareRequests] = useState<IncomingShareRequest[]>([]);
   const [outgoingShareRequests, setOutgoingShareRequests] = useState<Record<DeviceId, string>>({});
-  const [pendingPeer, setPendingPeer] = useState<TrustedPeer | null>(null);
-  const [safetyPhrase, setSafetyPhrase] = useState<string | null>(null);
-
-  const [trustedPeers, setTrustedPeers] = useState<Record<DeviceId, TrustedPeer>>(() => loadTrustedPeers());
-
+  const [pendingShareTarget, setPendingShareTarget] = useState<ShareTarget | null>(null);
+  const [shareModalTarget, setShareModalTarget] = useState<ShareTarget | null>(null);
+  const [shareModalFile, setShareModalFile] = useState<File | null>(null);
+  const [shareModalSending, setShareModalSending] = useState(false);
+  const [shareModalError, setShareModalError] = useState<string | null>(null);
+  const [incomingOfferModal, setIncomingOfferModal] = useState<TransferSession["incomingOffer"] | null>(null);
+  const [receivedReadyModal, setReceivedReadyModal] = useState<ReceivedReady | null>(null);
   const [activePeerId, setActivePeerId] = useState<DeviceId | null>(null);
   const [pc, setPc] = useState<PeerConnectionHandle | null>(null);
   const [dcStatus, setDcStatus] = useState<string>("disconnected");
@@ -106,10 +94,11 @@ export default function App() {
 
   const activePeerIdRef = useRef<DeviceId | null>(null);
   const pcRef = useRef<PeerConnectionHandle | null>(null);
-  const trustedPeersRef = useRef<Record<DeviceId, TrustedPeer>>(trustedPeers);
   const deviceNameRef = useRef<string>(deviceName);
   const authRequiredRef = useRef<boolean>(false);
   const authTokenRef = useRef<string | null>(authToken);
+  const presenceRef = useRef<PresenceDevice[]>([]);
+  const approvedSharePeersRef = useRef<Set<DeviceId>>(new Set());
 
   useEffect(() => {
     getOrCreateIdentity().then((id) => {
@@ -172,10 +161,6 @@ export default function App() {
   }, [pc]);
 
   useEffect(() => {
-    trustedPeersRef.current = trustedPeers;
-  }, [trustedPeers]);
-
-  useEffect(() => {
     deviceNameRef.current = deviceName;
   }, [deviceName]);
 
@@ -186,6 +171,10 @@ export default function App() {
   useEffect(() => {
     authTokenRef.current = authToken;
   }, [authToken]);
+
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
 
   useEffect(() => {
     localStorage.setItem(storageKey("localEmail"), localEmail);
@@ -209,11 +198,7 @@ export default function App() {
       onPresence: setPresence,
       onError: (m) => setWsError(m),
       onWelcome: (w) => setAuthInfo(w),
-      onPairMatched: async (peer) => {
-        const phrase = await deriveSafetyPhrase(identity.publicKeyJwk, peer.publicKeyJwk);
-        setPendingPeer({ ...peer, addedAtMs: Date.now() });
-        setSafetyPhrase(phrase);
-      },
+      onPairMatched: async () => {},
       onShareRequest: (request) => {
         setIncomingShareRequests((existing) => {
           if (existing.some((r) => r.requestId === request.requestId)) return existing;
@@ -226,7 +211,15 @@ export default function App() {
           delete next[response.from];
           return next;
         });
-        if (response.accepted) void connectToPeer(response.from);
+        if (response.accepted) {
+          const peer = presenceRef.current.find((p) => p.deviceId === response.from);
+          setPendingShareTarget({
+            deviceId: response.from,
+            name: peer?.name ?? "Peer",
+            deviceType: peer?.deviceType
+          });
+          void connectToPeer(response.from);
+        }
       }
     });
 
@@ -235,10 +228,12 @@ export default function App() {
       const active = activePeerIdRef.current;
       if (active && from !== active) return;
 
-      // Auto-answer offers from trusted peers.
-      const allowByAccount = authRequiredRef.current && !!authTokenRef.current;
-      const allowByTrust = !!trustedPeersRef.current[from];
-      if (!pcRef.current && signal.type === "offer" && (allowByTrust || allowByAccount)) {
+      // Auto-answer offers from same-account peers, or explicitly approved share requests.
+      const peerScope = presenceRef.current.find((d) => d.deviceId === from)?.scope;
+      const allowByAccount = !!authTokenRef.current && peerScope === "mine";
+      const allowByApprovedShare = approvedSharePeersRef.current.has(from);
+      if (!pcRef.current && signal.type === "offer" && (allowByAccount || allowByApprovedShare)) {
+        approvedSharePeersRef.current.delete(from);
         setActivePeerId(from);
 
         const handle = createPeerConnection({
@@ -271,12 +266,29 @@ export default function App() {
   }, [identity, authToken, signalingUrl, serverAuthRequired, findable]);
 
   useEffect(() => {
+    if (!transfer) return;
+    const unsub = transfer.onEvent((event) => {
+      if (event.type === "offer") setIncomingOfferModal(event.offer);
+      if (event.type === "received_ready") {
+        setReceivedReadyModal({ fileId: event.fileId, name: event.name, size: event.size });
+      }
+    });
+    return () => unsub();
+  }, [transfer]);
+
+  useEffect(() => {
+    if (!transfer || !pendingShareTarget || activePeerId !== pendingShareTarget.deviceId) return;
+    setShareModalTarget(pendingShareTarget);
+    setShareModalFile(null);
+    setPendingShareTarget(null);
+  }, [transfer, pendingShareTarget, activePeerId]);
+
+  useEffect(() => {
     if (!serverAuthRequired || authToken) return;
     setPresence([]);
     void disconnect();
   }, [serverAuthRequired, authToken]);
 
-  const peerChoices = useMemo(() => Object.values(trustedPeers), [trustedPeers]);
   const authRequired = authInfo?.authRequired ?? serverAuthRequired;
   const myDeviceChoices = useMemo(() => {
     if (!authToken) return [];
@@ -354,26 +366,6 @@ export default function App() {
     setAuthToken(token);
   }
 
-  async function localDoSignup() {
-    setWsError(null);
-    if (!localEmail.trim() || !localPassword) {
-      setWsError("Enter email and password.");
-      return;
-    }
-    const token = await derivePortableLocalToken(localEmail, localPassword);
-    localStorage.setItem(storageKey("authToken"), token);
-    setAuthToken(token);
-  }
-
-  async function onTrustPeer() {
-    if (!pendingPeer) return;
-    const next = { ...trustedPeers, [pendingPeer.deviceId]: pendingPeer };
-    setTrustedPeers(next);
-    saveTrustedPeers(next);
-    setPendingPeer(null);
-    setSafetyPhrase(null);
-  }
-
   async function connectToPeer(peerId: DeviceId) {
     if (!identity) return;
     const ws = getWsClient();
@@ -409,6 +401,7 @@ export default function App() {
 
   function respondToShareRequest(request: IncomingShareRequest, accepted: boolean) {
     const ws = getWsClient();
+    if (accepted) approvedSharePeersRef.current.add(request.from);
     ws.sendShareResponse(request.from, request.requestId, accepted);
     setIncomingShareRequests((existing) => existing.filter((r) => r.requestId !== request.requestId));
   }
@@ -421,6 +414,60 @@ export default function App() {
     await localDoLogin();
   }
 
+  async function startShareFlow(target: ShareTarget, kind: "mine" | "other") {
+    setWsError(null);
+    if (kind === "other") {
+      requestShareTo(target.deviceId);
+      return;
+    }
+    if (pc && activePeerId !== target.deviceId) await disconnect();
+    if (!pc || activePeerId !== target.deviceId || !transfer) {
+      setPendingShareTarget(target);
+      await connectToPeer(target.deviceId);
+      return;
+    }
+    setShareModalTarget(target);
+    setShareModalFile(null);
+  }
+
+  async function sendFromShareModal() {
+    if (!transfer || !shareModalFile) return;
+    setShareModalError(null);
+    setShareModalSending(true);
+    try {
+      await transfer.sendFile(shareModalFile);
+      setShareModalTarget(null);
+      setShareModalFile(null);
+    } catch (e) {
+      setShareModalError(String(e));
+    } finally {
+      setShareModalSending(false);
+    }
+  }
+
+  function closeShareModal() {
+    if (shareModalSending) return;
+    setShareModalTarget(null);
+    setShareModalFile(null);
+    setShareModalError(null);
+  }
+
+  function closeIncomingOfferModal() {
+    setIncomingOfferModal(null);
+  }
+
+  async function downloadReceivedModalFile() {
+    if (!transfer || !receivedReadyModal) return;
+    await transfer.saveReceived(receivedReadyModal.fileId);
+    setReceivedReadyModal(null);
+  }
+
+  function dismissReceivedModalFile() {
+    if (!transfer || !receivedReadyModal) return;
+    transfer.discardReceived(receivedReadyModal.fileId);
+    setReceivedReadyModal(null);
+  }
+
   async function disconnect() {
     pc?.close();
     transfer?.dispose();
@@ -428,19 +475,6 @@ export default function App() {
     setTransfer(null);
     setDcStatus("disconnected");
     setActivePeerId(null);
-  }
-
-  async function disconnectDevice(peerId: DeviceId) {
-    if (activePeerId !== peerId) return;
-    await disconnect();
-  }
-
-  async function forgetDevice(peerId: DeviceId) {
-    if (activePeerId === peerId) await disconnect();
-    const next = { ...trustedPeers };
-    delete next[peerId];
-    setTrustedPeers(next);
-    saveTrustedPeers(next);
   }
 
   if (!identity) return <div className="wrap">Loading…</div>;
@@ -556,13 +590,18 @@ export default function App() {
                     <small className="muted">{peer.deviceId.slice(0, 8)}</small>
                   </div>
                 </div>
-                {activePeerId === peer.deviceId ? (
-                  <span className="pill">Connected</span>
-                ) : (
-                  <button className="btn btn-primary" disabled={!!pc} onClick={() => connectToPeer(peer.deviceId)}>
-                    Connect
-                  </button>
-                )}
+                <button
+                  className="btn btn-primary"
+                  disabled={!!pc && activePeerId !== peer.deviceId}
+                  onClick={() =>
+                    void startShareFlow(
+                      { deviceId: peer.deviceId, name: peer.name, deviceType: peer.deviceType },
+                      "mine"
+                    )
+                  }
+                >
+                  {activePeerId === peer.deviceId ? "Share" : "Share"}
+                </button>
               </div>
             ))}
           </div>
@@ -588,142 +627,115 @@ export default function App() {
                 <button
                   className="btn btn-primary"
                   disabled={!!pc || !!outgoingShareRequests[peer.deviceId]}
-                  onClick={() => requestShareTo(peer.deviceId)}
+                  onClick={() =>
+                    void startShareFlow(
+                      { deviceId: peer.deviceId, name: peer.name, deviceType: peer.deviceType },
+                      "other"
+                    )
+                  }
                 >
                   {outgoingShareRequests[peer.deviceId] ? "Pending" : "Request"}
                 </button>
               </div>
             ))}
           </div>
-
-          {incomingShareRequests.length > 0 ? (
-            <ul className="list section-gap">
-              {incomingShareRequests.map((request) => (
-                <li className="list-item" key={request.requestId}>
-                  <span className="device-inline">
-                    <span className="device-icon" aria-hidden>
-                      {DEVICE_ICON[request.fromDeviceType ?? "unknown"]}
-                    </span>
-                    <span>{request.fromName}</span>
-                  </span>
-                  <span className="row">
-                    <button className="btn btn-primary" onClick={() => respondToShareRequest(request, true)}>
-                      ✓
-                    </button>
-                    <button className="btn" onClick={() => respondToShareRequest(request, false)}>
-                      ✕
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          <div className="section-gap">{transfer ? <TransferUi transfer={transfer} /> : null}</div>
         </section>
       </div>
-    </div>
-  );
-}
 
-function TransferUi({ transfer }: { transfer: TransferSession }) {
-  const [log, setLog] = useState<string[]>([]);
-  const [incomingOffer, setIncomingOffer] = useState<TransferSession["incomingOffer"] | null>(null);
-  const [progress, setProgress] = useState<{ fileId: string; sent: number; total: number } | null>(null);
-  const [activeFileId, setActiveFileId] = useState<string | null>(null);
-  const [phase, setPhase] = useState<string>("idle");
-  const [phaseDetail, setPhaseDetail] = useState<string>("");
-
-  useEffect(() => {
-    const unsub = transfer.onEvent((e) => {
-      if (e.type === "log") setLog((l) => [e.message, ...l].slice(0, 50));
-      if (e.type === "offer") setIncomingOffer(e.offer);
-      if (e.type === "progress") setProgress({ fileId: e.fileId, sent: e.sentBytes, total: e.totalBytes });
-      if (e.type === "status") {
-        setActiveFileId(e.fileId);
-        setPhase(e.phase);
-        setPhaseDetail(e.detail ?? "");
-        if (e.phase === "done" || e.phase === "cancelled" || e.phase === "failed") {
-          setProgress(null);
-        }
-      }
-      if (e.type === "error") {
-        setActiveFileId(e.fileId);
-        setPhase("failed");
-        setPhaseDetail(e.message);
-      }
-      if (e.type === "done") {
-        setProgress(null);
-      }
-    });
-    return () => unsub();
-  }, [transfer]);
-
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div className="row">
-        <input
-          type="file"
-          onChange={async (e) => {
-            const f = e.target.files?.[0];
-            if (!f) return;
-            try {
-              await transfer.sendFile(f);
-            } catch (err) {
-              setLog((l) => [`Send failed: ${String(err)}`, ...l].slice(0, 50));
-            }
-            e.currentTarget.value = "";
-          }}
-        />
-        {activeFileId && (phase === "pending_accept" || phase === "sending" || phase === "receiving") ? (
-          <button className="btn" onClick={() => transfer.cancelTransfer(activeFileId)}>
-            Cancel Transfer
-          </button>
-        ) : null}
-      </div>
-
-      {incomingOffer ? (
-        <div style={{ marginTop: 10 }}>
-          <div className="row">
-            <strong>Incoming file:</strong> {incomingOffer.name} <span className="pill">{incomingOffer.size} bytes</span>
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                transfer.acceptOffer(incomingOffer.fileId);
-                setIncomingOffer(null);
-              }}
-            >
-              Accept
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                transfer.declineOffer(incomingOffer.fileId);
-                setIncomingOffer(null);
-              }}
-            >
-              Decline
-            </button>
+      {shareModalTarget ? (
+        <div className="modal-backdrop" onClick={closeShareModal}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3>Share</h3>
+            <small className="muted">{shareModalTarget.name}</small>
+            {transfer?.isReady() ? <small className="muted">Connection ready</small> : <small className="muted">Connecting…</small>}
+            <div className="section-gap">
+              <input
+                type="file"
+                onChange={(e) => setShareModalFile(e.target.files?.[0] ?? null)}
+                disabled={shareModalSending}
+              />
+            </div>
+            <div className="row section-gap">
+              <button
+                className="btn btn-primary"
+                disabled={!shareModalFile || shareModalSending || !transfer?.isReady()}
+                onClick={() => void sendFromShareModal()}
+              >
+                {shareModalSending ? "Uploading…" : "Upload"}
+              </button>
+              <button className="btn" onClick={closeShareModal} disabled={shareModalSending}>
+                Close
+              </button>
+            </div>
+            {shareModalError ? <small style={{ color: "tomato" }}>{shareModalError}</small> : null}
           </div>
         </div>
       ) : null}
 
-      {progress ? (
-        <p style={{ marginTop: 10 }}>
-          Progress: {Math.floor((progress.sent / Math.max(1, progress.total)) * 100)}% ({progress.sent}/{progress.total})
-        </p>
+      {incomingShareRequests[0] ? (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <h3>Incoming Request</h3>
+            <small className="muted">{incomingShareRequests[0].fromName} wants to send data.</small>
+            <div className="row section-gap">
+              <button className="btn btn-primary" onClick={() => respondToShareRequest(incomingShareRequests[0], true)}>
+                Approve
+              </button>
+              <button className="btn" onClick={() => respondToShareRequest(incomingShareRequests[0], false)}>
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
-      <p style={{ marginTop: 10 }}>
-        Phase: <span className="pill">{phase}</span> {phaseDetail ? <small className="muted">{phaseDetail}</small> : null}
-      </p>
+      {incomingOfferModal ? (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <h3>Incoming File</h3>
+            <small className="muted">{incomingOfferModal.name}</small>
+            <small className="muted">{incomingOfferModal.size} bytes</small>
+            <div className="row section-gap">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  transfer?.acceptOffer(incomingOfferModal.fileId);
+                  closeIncomingOfferModal();
+                }}
+              >
+                Accept
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  transfer?.declineOffer(incomingOfferModal.fileId);
+                  closeIncomingOfferModal();
+                }}
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-      <details style={{ marginTop: 10 }}>
-        <summary>Logs</summary>
-        <pre style={{ whiteSpace: "pre-wrap" }}>{log.join("\n")}</pre>
-      </details>
+      {receivedReadyModal ? (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <h3>Download File</h3>
+            <small className="muted">{receivedReadyModal.name}</small>
+            <small className="muted">{receivedReadyModal.size} bytes</small>
+            <div className="row section-gap">
+              <button className="btn btn-primary" onClick={() => void downloadReceivedModalFile()}>
+                Download
+              </button>
+              <button className="btn" onClick={dismissReceivedModalFile}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

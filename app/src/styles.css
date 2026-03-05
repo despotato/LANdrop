@@ -144,6 +144,42 @@ body {
   margin: 0;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 8, 20, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.modal-card {
+  width: min(460px, calc(100vw - 28px));
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(16, 24, 46, 0.96);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.modal-card h3 {
+  margin: 0;
+}
+
+.modal-card .row {
+  justify-content: center;
+}
+
+.modal-card input[type="file"] {
+  width: 100%;
+}
+
 .row {
   display: flex;
   gap: 8px;

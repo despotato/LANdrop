@@ -11,6 +11,7 @@ type TransferEvent =
   | { type: "progress"; fileId: FileId; sentBytes: number; totalBytes: number }
   | { type: "done"; fileId: FileId }
   | { type: "received"; fileId: FileId; name: string; size: number }
+  | { type: "received_ready"; fileId: FileId; name: string; size: number; mimeType: string }
   | { type: "error"; fileId: FileId; message: string };
 
 type Listener = (e: TransferEvent) => void;
@@ -41,9 +42,12 @@ const ACCEPT_TIMEOUT_MS = 15_000;
 export type TransferSession = {
   incomingOffer: Offer | null;
   onEvent(cb: Listener): () => void;
+  isReady(): boolean;
   sendFile(file: File): Promise<void>;
   acceptOffer(fileId: FileId): void;
   declineOffer(fileId: FileId): void;
+  saveReceived(fileId: FileId): Promise<void>;
+  discardReceived(fileId: FileId): void;
   cancelTransfer(fileId: FileId): void;
   dispose(): void;
 };
@@ -56,6 +60,7 @@ export function createTransferSession(opts: {
   const listeners = new Set<Listener>();
   const incoming = new Map<FileId, IncomingState>();
   const outgoing = new Map<FileId, OutgoingState>();
+  const receivedPending = new Map<FileId, { name: string; mimeType: string; bytes: Uint8Array }>();
   let incomingOffer: Offer | null = null;
 
   function emit(e: TransferEvent) {
@@ -193,26 +198,17 @@ export function createTransferSession(opts: {
       parts.push(c);
     }
 
-    // Prefer native save (Tauri), fallback to browser download.
     const bytes = concat(parts);
-    const saved = await trySaveToDownloads(offer.name, bytes);
-    if (saved) {
-      log(`Saved to ${saved.path}`);
-    } else {
-      const copy = new Uint8Array(bytes.byteLength);
-      copy.set(bytes);
-      const blob = new Blob([copy.buffer], { type: offer.mimeType || "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = offer.name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    }
+    receivedPending.set(fileId, {
+      name: offer.name,
+      mimeType: offer.mimeType || "application/octet-stream",
+      bytes
+    });
 
+    emit({ type: "received_ready", fileId, name: offer.name, size: offer.size, mimeType: offer.mimeType });
     emit({ type: "received", fileId, name: offer.name, size: offer.size });
-    status(fileId, "done", "Received and saved");
-    log(`Received ${offer.name}`);
+    status(fileId, "done", "Received; waiting for download");
+    log(`Received ${offer.name}; waiting for user download`);
     incoming.delete(fileId);
     incomingOffer = null;
   }
@@ -264,7 +260,27 @@ export function createTransferSession(opts: {
 
   async function sendFile(file: File) {
     if (opts.dataChannel.readyState !== "open") {
-      throw new Error("DataChannel is not open");
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          cleanup();
+          reject(new Error("DataChannel did not open in time"));
+        }, 8_000);
+        const onOpen = () => {
+          cleanup();
+          resolve();
+        };
+        const onClose = () => {
+          cleanup();
+          reject(new Error("DataChannel is not open"));
+        };
+        const cleanup = () => {
+          window.clearTimeout(timeout);
+          opts.dataChannel.removeEventListener("open", onOpen);
+          opts.dataChannel.removeEventListener("close", onClose);
+        };
+        opts.dataChannel.addEventListener("open", onOpen);
+        opts.dataChannel.addEventListener("close", onClose);
+      });
     }
     if (outgoing.size > 0) {
       throw new Error("Another transfer is already in progress");
@@ -362,6 +378,34 @@ export function createTransferSession(opts: {
     log(`Declined ${fileId}`);
   }
 
+  async function saveReceived(fileId: FileId): Promise<void> {
+    const pending = receivedPending.get(fileId);
+    if (!pending) return;
+    const saved = await trySaveToDownloads(pending.name, pending.bytes);
+    if (saved) {
+      log(`Saved to ${saved.path}`);
+    } else {
+      const copy = new Uint8Array(pending.bytes.byteLength);
+      copy.set(pending.bytes);
+      const blob = new Blob([copy.buffer], { type: pending.mimeType || "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = pending.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    }
+    receivedPending.delete(fileId);
+    log(`Downloaded ${pending.name}`);
+  }
+
+  function discardReceived(fileId: FileId): void {
+    if (!receivedPending.has(fileId)) return;
+    const pending = receivedPending.get(fileId);
+    receivedPending.delete(fileId);
+    if (pending) log(`Dismissed ${pending.name}`);
+  }
+
   function cancelTransfer(fileId: FileId) {
     const out = outgoing.get(fileId);
     if (out) {
@@ -388,13 +432,19 @@ export function createTransferSession(opts: {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
+    isReady() {
+      return opts.dataChannel.readyState === "open";
+    },
     sendFile,
     acceptOffer,
     declineOffer,
+    saveReceived,
+    discardReceived,
     cancelTransfer,
     dispose() {
       listeners.clear();
       incoming.clear();
+      receivedPending.clear();
       for (const [fileId, out] of outgoing) {
         if (out.accepted === null) out.resolveAccept(false);
         sendControl({ type: "CANCEL", fileId, reason: "session_disposed" });
