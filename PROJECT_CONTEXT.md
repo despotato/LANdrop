@@ -133,3 +133,5 @@ App-first architecture plan rewrite lives at `docs/WEBRTC_SEND_PIPE_ARCH_PLAN_v2
   - On `v*` tag push: publishes a GitHub Release and auto-attaches built artifacts.
 - Documented local macOS build + CI release flow in `README.md`.
 - CI workflow hardening: explicitly passes bundle targets per OS (`appimage,deb` on Linux; `nsis,msi` on Windows), expands artifact globbing to include target-triple paths, and prints target/bundle directories for easier debugging.
+- Generated Tauri icon set from `app/src-tauri/icons/icon.png` (including `icon.ico`) so Windows CI bundling can complete.
+- Added explicit Tauri bundle icon config in `app/src-tauri/tauri.conf.json` so Linux AppImage bundling can resolve a square icon.
