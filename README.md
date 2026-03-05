@@ -1,4 +1,4 @@
-# P2P Send Pipe (WebRTC MVP)
+# LANdrop (WebRTC MVP)
 
 Personal, cross-device transfer tool (files + text + clipboard) using WebRTC DataChannels with a minimal WebSocket signaling server.
 

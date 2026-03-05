@@ -1,7 +1,7 @@
 # PROJECT_CONTEXT
 
 ## Purpose
-Build a lightweight personal “send pipe” to transfer files, text, and clipboard between a user’s own devices over peer-to-peer WebRTC DataChannels, using only a minimal signaling server for discovery and connection setup.
+Build a lightweight personal LANdrop app to transfer files, text, and clipboard between a user’s own devices over peer-to-peer WebRTC DataChannels, using only a minimal signaling server for discovery and connection setup.
 
 ## Architecture Overview
 - `server/`: WebSocket signaling server (presence, pairing sessions, SDP/ICE relay)
@@ -132,3 +132,4 @@ App-first architecture plan rewrite lives at `docs/WEBRTC_SEND_PIPE_ARCH_PLAN_v2
   - On push: builds Windows + Linux desktop bundles and uploads workflow artifacts.
   - On `v*` tag push: publishes a GitHub Release and auto-attaches built artifacts.
 - Documented local macOS build + CI release flow in `README.md`.
+- CI workflow hardening: explicitly passes bundle targets per OS (`appimage,deb` on Linux; `nsis,msi` on Windows), expands artifact globbing to include target-triple paths, and prints target/bundle directories for easier debugging.

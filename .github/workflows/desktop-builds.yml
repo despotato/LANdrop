@@ -18,7 +18,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        include:
+          - os: ubuntu-22.04
+            tauri_bundles: appimage,deb
+          - os: windows-latest
+            tauri_bundles: nsis,msi
 
     steps:
       - name: Checkout
@@ -48,14 +52,25 @@ jobs:
         run: npm ci
 
       - name: Build desktop app
-        run: npm run tauri:build -w @landrop/app
+        run: npm run tauri:build -w @landrop/app -- --bundles ${{ matrix.tauri_bundles }}
+
+      - name: Inspect build output
+        if: always()
+        shell: bash
+        run: |
+          echo "Top-level target directories:"
+          ls -la app/src-tauri/target || true
+          echo "Bundle directories:"
+          find app/src-tauri/target -type d -name bundle | head -n 20 || true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: landrop-${{ runner.os }}-${{ github.sha }}
-          path: app/src-tauri/target/release/bundle/**
-          if-no-files-found: error
+          path: |
+            app/src-tauri/target/release/bundle/**
+            app/src-tauri/target/*/release/bundle/**
+          if-no-files-found: warn
 
   release:
     name: Publish Release Assets

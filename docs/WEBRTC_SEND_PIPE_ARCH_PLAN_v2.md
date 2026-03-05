@@ -1,4 +1,4 @@
-# P2P Send Pipe — App-First Architecture & Implementation Plan (v2)
+# LANdrop — App-First Architecture & Implementation Plan (v2)
 
 This is an app-first rewrite of the original “WebRTC MVP plan”. It assumes the end user installs apps on each device and uses the product through normal OS affordances (tray/menu bar, drag & drop, share sheet), not dev steps like opening multiple browser windows.
 
