@@ -20,7 +20,7 @@ npm install
 2) Start signaling server
 
 ```bash
-npm run dev -w @sendpipe/server
+npm run dev -w @landrop/server
 ```
 
 Optional (account mode):
@@ -30,17 +30,22 @@ Optional (account mode):
 LAN discovery (so clients auto-find the server on the same Wi‑Fi):
 - Enabled by default. Server listens on UDP `8788` and responds to discovery probes.
 - Override with `LAN_DISCOVERY=0` or `DISCOVERY_PORT=...`.
-- In Tauri dev builds, if no server is found, the app will try to start the server automatically by spawning `npm run dev -w @sendpipe/server`.
+- In Tauri dev builds, if no server is found, the app will try to start the server automatically by spawning `npm run dev -w @landrop/server`.
 - If `AUTH_REQUIRED=1`, the desktop app will *discover the server first* (so it knows where to log in) and then delay the WebSocket presence connection until after you sign in.
 
 Portable LAN account (recommended for “any server on the LAN”):
 - The email/password buttons in the app generate a portable token (`local:<sha256(email:password)>`) and do not require server signup.
 - Any LAN signaling server with `AUTH_REQUIRED=1 LOCAL_AUTH=1` will scope devices by that token, so devices will see each other even if they hit different servers.
 
+Findable mode:
+- Each device can toggle `Findable` on/off in the app.
+- When `Findable` is ON, same-account devices can discover and connect directly (no pairing code or safety-phrase verification needed).
+- When `Findable` is OFF, the device is hidden from presence discovery and rejects direct WebRTC targeting.
+
 3) Run the desktop app (Tauri)
 
 ```bash
-npm run tauri:dev -w @sendpipe/app
+npm run tauri:dev -w @landrop/app
 ```
 
 4) Pair two devices

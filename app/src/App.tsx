@@ -1,5 +1,5 @@
-import type { DeviceId } from "@sendpipe/shared";
-import { deriveSafetyPhrase } from "@sendpipe/shared";
+import type { DeviceId } from "@landrop/shared";
+import { deriveSafetyPhrase } from "@landrop/shared";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getOrCreateIdentity, setDeviceName, type LocalIdentity } from "./lib/deviceIdentity.js";
 import { storageKey } from "./lib/storage.js";
@@ -42,6 +42,10 @@ function saveTrustedPeers(peers: Record<DeviceId, TrustedPeer>) {
 export default function App() {
   const [identity, setIdentity] = useState<LocalIdentity | null>(null);
   const [deviceName, setDeviceNameState] = useState<string>("");
+  const [findable, setFindable] = useState<boolean>(() => {
+    const raw = localStorage.getItem(storageKey("findable"));
+    return raw === null ? true : raw === "1";
+  });
   const [signalingUrl, setSignalingUrl] = useState<string | null>(ENV_SIGNALING_URL ?? null);
   const [signalingHttpBase, setSignalingHttpBase] = useState<string>(DEFAULT_SIGNALING_HTTP);
   const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
@@ -160,6 +164,7 @@ export default function App() {
     const client = createWsClient({
       url: signalingUrl,
       identity,
+      findable,
       authToken,
       onPresence: setPresence,
       onError: (m) => setWsError(m),
@@ -210,12 +215,12 @@ export default function App() {
       unsubAny();
       client.close();
     };
-  }, [identity, authToken, signalingUrl, serverAuthRequired]);
+  }, [identity, authToken, signalingUrl, serverAuthRequired, findable]);
 
   const peerChoices = useMemo(() => Object.values(trustedPeers), [trustedPeers]);
   const connectChoices = useMemo(() => {
     if (authInfo?.authRequired && authToken) {
-      return presence.filter((d) => d.deviceId !== identity?.deviceId && d.online);
+      return presence.filter((d) => d.deviceId !== identity?.deviceId && d.online && d.findable);
     }
     return peerChoices.map((p) => ({ deviceId: p.deviceId, name: p.name, online: true }));
   }, [authInfo?.authRequired, authToken, presence, peerChoices, identity?.deviceId]);
@@ -253,22 +258,18 @@ export default function App() {
   }
 
   async function openLoginUrl(url: string) {
-    try {
-      const mod = await import("@tauri-apps/api/shell");
-      await mod.open(url);
-    } catch {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   useEffect(() => {
     if (!authFlow) return;
     let cancelled = false;
+    const flow = authFlow;
 
     async function loop() {
       while (!cancelled) {
         try {
-          const res = await pollGoogleDeviceAuth(signalingHttpBase, authFlow.device_code);
+          const res = await pollGoogleDeviceAuth(signalingHttpBase, flow.device_code);
           if (res.ok) {
             localStorage.setItem(storageKey("authToken"), res.sessionToken);
             setAuthToken(res.sessionToken);
@@ -280,7 +281,7 @@ export default function App() {
         } catch {
           // ignore; keep polling
         }
-        await new Promise((r) => setTimeout(r, Math.max(2, authFlow.intervalSec) * 1000));
+        await new Promise((r) => setTimeout(r, Math.max(2, flow.intervalSec) * 1000));
       }
     }
 
@@ -362,7 +363,7 @@ export default function App() {
 
   return (
     <div className="wrap">
-      <h2>SendPipe</h2>
+      <h2>LANdrop</h2>
 
       <div className="card">
         <h3>Account</h3>
@@ -430,16 +431,38 @@ export default function App() {
               const name = e.target.value;
               setDeviceNameState(name);
               setDeviceName(name);
-              getWsClient().updateHelloName(name);
+              getWsClient().updateHelloState(name, findable);
             }}
             placeholder="Device name"
           />
+          <label className="row" style={{ gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={findable}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setFindable(next);
+                localStorage.setItem(storageKey("findable"), next ? "1" : "0");
+                try {
+                  getWsClient().updateHelloState(deviceName, next);
+                } catch {
+                  // not connected yet
+                }
+              }}
+            />
+            <small className="muted">Findable</small>
+          </label>
           <small className="muted">Signaling: {signalingUrl ?? "…"}</small>
         </div>
+        {findable ? (
+          <small className="muted">Findable ON: same-account devices can connect directly without pair codes.</small>
+        ) : (
+          <small className="muted">Findable OFF: this device is hidden from discovery and direct targeting.</small>
+        )}
         {wsError ? <p style={{ color: "tomato" }}>{wsError}</p> : null}
       </div>
 
-      <div className="card">
+      {!findable ? <div className="card">
         <h3>Pairing (optional)</h3>
         <div className="row">
           <button onClick={onCreatePairCode}>Create pairing code</button>
@@ -479,7 +502,7 @@ export default function App() {
             </small>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div className="card">
         <h3>Presence</h3>

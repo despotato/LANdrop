@@ -1,5 +1,5 @@
 {
-  "name": "@sendpipe/server",
+  "name": "@landrop/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@sendpipe/shared": "^0.1.0",
+    "@landrop/shared": "^0.1.0",
     "ws": "^8.18.1"
   },
   "devDependencies": {

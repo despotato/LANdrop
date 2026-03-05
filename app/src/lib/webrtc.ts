@@ -1,4 +1,4 @@
-import type { IceCandidateInit } from "@sendpipe/shared";
+import type { IceCandidateInit } from "@landrop/shared";
 
 type Signal =
   | { type: "offer"; sdp: string }
@@ -45,7 +45,7 @@ export function createPeerConnection(opts: WebRtcOptions): PeerConnectionHandle 
   }
 
   async function startAsCaller(_peerId: string) {
-    dc = pc.createDataChannel("sendpipe", { ordered: true });
+    dc = pc.createDataChannel("landrop", { ordered: true });
     wireDc(dc);
     opts.onDataChannel(dc);
     const offer = await pc.createOffer();

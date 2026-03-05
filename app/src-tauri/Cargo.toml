@@ -1,5 +1,5 @@
 [package]
-name = "sendpipe"
+name = "landrop"
 version = "0.1.0"
 description = "P2P Send Pipe"
 authors = ["you"]

@@ -91,7 +91,7 @@ pub fn discover_signaling(timeout_ms: u64, discovery_port: u16) -> Result<Vec<Di
 
   let broadcast = SocketAddrV4::new(std::net::Ipv4Addr::BROADCAST, discovery_port);
   sock
-    .send_to(b"SENDPIPE_DISCOVER_V1", broadcast)
+    .send_to(b"LANDROP_DISCOVER_V1", broadcast)
     .map_err(|e| format!("send failed: {e}"))?;
 
   let start = Instant::now();
@@ -103,7 +103,7 @@ pub fn discover_signaling(timeout_ms: u64, discovery_port: u16) -> Result<Vec<Di
       Ok((n, from)) => {
         let text = String::from_utf8_lossy(&buf[..n]);
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-          if v.get("type").and_then(|t| t.as_str()) != Some("SENDPIPE_DISCOVERY_V1") {
+          if v.get("type").and_then(|t| t.as_str()) != Some("LANDROP_DISCOVERY_V1") {
             continue;
           }
           let ws_port = v.get("wsPort").and_then(|p| p.as_u64()).unwrap_or(8787) as u16;
@@ -168,7 +168,7 @@ fn start_external_server_if_needed() -> Result<bool, String> {
     .arg("run")
     .arg("dev")
     .arg("-w")
-    .arg("@sendpipe/server")
+    .arg("@landrop/server")
     .stdin(Stdio::null())
     .stdout(Stdio::null())
     .stderr(Stdio::null());

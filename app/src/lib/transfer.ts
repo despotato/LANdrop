@@ -1,5 +1,5 @@
-import type { DcControlMessage, DcFileOffer, FileId } from "@sendpipe/shared";
-import { packFileChunk, unpackFileChunk } from "@sendpipe/shared";
+import type { DcControlMessage, DcFileOffer, FileId } from "@landrop/shared";
+import { packFileChunk, unpackFileChunk } from "@landrop/shared";
 
 type Offer = DcFileOffer;
 type TransferPhase = "idle" | "offered" | "pending_accept" | "sending" | "receiving" | "done" | "failed" | "cancelled";
@@ -199,7 +199,9 @@ export function createTransferSession(opts: {
     if (saved) {
       log(`Saved to ${saved.path}`);
     } else {
-      const blob = new Blob([bytes], { type: offer.mimeType || "application/octet-stream" });
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      const blob = new Blob([copy.buffer], { type: offer.mimeType || "application/octet-stream" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

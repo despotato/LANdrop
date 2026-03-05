@@ -12,8 +12,9 @@ Build a lightweight personal “send pipe” to transfer files, text, and clipbo
 App shell started: Tauri wrapper around the UI with native save-to-Downloads for received files.
 Account mode started: Google device-flow login on the signaling server; WS presence is scoped per user.
 LAN discovery started: server responds to UDP discovery; app auto-finds the local signaling server in Tauri.
-Dev convenience: Tauri can auto-start the Node signaling server if none is found on LAN (spawns `npm run dev -w @sendpipe/server`).
-- Auth gating: when LAN server requires auth, the app delays opening the WebSocket until after sign-in.
+Dev convenience: Tauri can auto-start the Node signaling server if none is found on LAN (spawns `npm run dev -w @landrop/server`).
+Auth gating: when LAN server requires auth, the app delays opening the WebSocket until after sign-in.
+Transfer handshake hardened: sender waits for explicit receiver acceptance before chunking; cancel/timeout paths are implemented on both sides.
 
 ## Key Design Decisions
 - WebSocket signaling is JSON messages with explicit `type` fields.
@@ -26,6 +27,8 @@ Dev convenience: Tauri can auto-start the Node signaling server if none is found
 - Local auth option for testing: email+password endpoints issue the same session token used by WS auth.
 - Portable local auth option for LAN: clients derive `authToken = local:<sha256(email:password)>` so any server can scope the same account without shared DB/sessions.
 - LAN discovery uses UDP broadcast to find a signaling server on the same network (Tauri only; web dev still uses env URLs).
+- Device discoverability is explicit: `findable` is sent in `hello`, presence only includes findable devices, and direct signaling relay rejects non-findable targets.
+- File transfer protocol now enforces `FILE_OFFER -> ACCEPT/DECLINE -> chunk stream -> DONE/CANCEL` with explicit UI-visible phases.
 
 ## File Structure
 - `shared/src/protocol.ts`: WS + DataChannel message types
@@ -33,7 +36,6 @@ Dev convenience: Tauri can auto-start the Node signaling server if none is found
 - `shared/src/chunkFraming.ts`: binary chunk header framing
 - `server/src/index.ts`: signaling server
 - `app/src/lib/*`: client modules (identity, ws, webrtc, transfer)
-- `app/src-tauri/src/lib.rs`: native commands (save to Downloads)
 - `app/src-tauri/src/commands.rs`: native commands (save to Downloads)
 - `app/src-tauri/icons/icon.png`: placeholder app icon
 - `app/src/lib/authClient.ts`: Google device-flow helper (server endpoints)

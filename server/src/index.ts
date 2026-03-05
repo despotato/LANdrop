@@ -10,10 +10,11 @@ import type {
   WsClientMessage,
   WsServerMessage,
   WsServerWelcome
-} from "@sendpipe/shared";
+} from "@landrop/shared";
 
 type User = { sub: string; email?: string; name?: string; picture?: string };
 type LocalUser = { id: string; email: string; passwordHash: string; createdAtMs: number };
+type JsonWebKeyLike = Record<string, unknown>;
 
 type Session = {
   token: string;
@@ -24,10 +25,11 @@ type Session = {
 type DeviceRecord = {
   deviceId: DeviceId;
   name: string;
-  publicKeyJwk: JsonWebKey;
+  publicKeyJwk: JsonWebKeyLike;
   ws: WebSocket;
   lastSeenMs: number;
   userSub: string | null;
+  findable: boolean;
 };
 
 type PairSession = {
@@ -110,12 +112,13 @@ function getUserSubForDevice(deviceId: DeviceId): string | null {
 
 function broadcastPresence(userSub: string | null): void {
   const snapshot = Array.from(devices.values())
-    .filter((d) => d.userSub === userSub)
+    .filter((d) => d.userSub === userSub && d.findable)
     .map((d) => ({
       deviceId: d.deviceId,
       name: d.name,
       online: d.ws.readyState === WebSocket.OPEN,
       lastSeenMs: d.lastSeenMs,
+      findable: d.findable,
       publicKeyJwk: d.publicKeyJwk
     }));
 
@@ -409,7 +412,8 @@ wss.on("connection", (ws) => {
         publicKeyJwk: hello.publicKeyJwk,
         ws,
         lastSeenMs: nowMs(),
-        userSub
+        userSub,
+        findable: hello.findable ?? true
       });
 
       const welcome: WsServerWelcome = {
@@ -421,7 +425,7 @@ wss.on("connection", (ws) => {
       safeSend(ws, welcome);
 
       console.log(
-        `[signaling] hello ${hello.deviceId.slice(0, 8)} user=${userSub ? userSub.slice(0, 8) : "none"} name="${hello.name}"`
+        `[signaling] hello ${hello.deviceId.slice(0, 8)} user=${userSub ? userSub.slice(0, 8) : "none"} name="${hello.name}" findable=${hello.findable ?? true}`
       );
       broadcastPresence(userSub);
       return;
@@ -520,6 +524,10 @@ wss.on("connection", (ws) => {
           safeSend(ws, { type: "error", message: "Target offline" });
           return;
         }
+        if (!target.findable) {
+          safeSend(ws, { type: "error", message: "Target is not findable" });
+          return;
+        }
         if (AUTH_REQUIRED) {
           const fromUser = getUserSubForDevice(deviceId);
           if (!fromUser || target.userSub !== fromUser) {
@@ -557,9 +565,9 @@ server.listen(PORT, () => {
     sock.on("error", (err) => console.log("[discovery] error", String(err)));
     sock.on("message", (msg, rinfo) => {
       const text = msg.toString("utf-8").trim();
-      if (text !== "SENDPIPE_DISCOVER_V1") return;
+      if (text !== "LANDROP_DISCOVER_V1") return;
       const payload = JSON.stringify({
-        type: "SENDPIPE_DISCOVERY_V1",
+        type: "LANDROP_DISCOVERY_V1",
         instanceId: discoveryInstanceId,
         wsPort: PORT,
         wsPath: "/",
@@ -570,7 +578,7 @@ server.listen(PORT, () => {
       sock.send(Buffer.from(payload, "utf-8"), rinfo.port, rinfo.address);
     });
     sock.bind(DISCOVERY_PORT, "0.0.0.0", () => {
-      console.log(`[discovery] udp://0.0.0.0:${DISCOVERY_PORT} (responds to SENDPIPE_DISCOVER_V1)`);
+      console.log(`[discovery] udp://0.0.0.0:${DISCOVERY_PORT} (responds to LANDROP_DISCOVER_V1)`);
     });
   }
 });

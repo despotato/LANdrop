@@ -15,6 +15,7 @@ export type WsClientHello = {
   name: string;
   publicKeyJwk: JsonWebKey;
   authToken?: string;
+  findable?: boolean;
 };
 
 export type WsServerWelcome = {
@@ -31,6 +32,7 @@ export type WsPresence = {
     name: string;
     online: boolean;
     lastSeenMs: number;
+    findable: boolean;
     publicKeyJwk?: JsonWebKey;
   }>;
 };

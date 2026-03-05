@@ -1,5 +1,5 @@
 {
-  "name": "sendpipe",
+  "name": "landrop",
   "private": true,
   "workspaces": [
     "shared",
@@ -7,11 +7,11 @@
     "app"
   ],
   "scripts": {
-    "postinstall": "npm run build -w @sendpipe/shared",
+    "postinstall": "npm run build -w @landrop/shared",
     "context:pdf": "cupsfilter -m application/pdf PROJECT_CONTEXT.md > PROJECT_CONTEXT.pdf",
     "plan:pdf": "cupsfilter -m application/pdf docs/WEBRTC_SEND_PIPE_ARCH_PLAN_v2.md > docs/WEBRTC_SEND_PIPE_ARCH_PLAN_v2.pdf",
-    "dev": "npm run dev -w @sendpipe/server",
-    "build": "npm run build -w @sendpipe/shared && npm run build -w @sendpipe/server && npm run build -w @sendpipe/app",
+    "dev": "npm run dev -w @landrop/server",
+    "build": "npm run build -w @landrop/shared && npm run build -w @landrop/server && npm run build -w @landrop/app",
     "typecheck": "npm run typecheck -ws"
   }
 }

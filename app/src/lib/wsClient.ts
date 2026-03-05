@@ -6,8 +6,8 @@ import type {
   WsWebrtcAnswer,
   WsWebrtcIce,
   WsWebrtcOffer
-} from "@sendpipe/shared";
-import { isObject } from "@sendpipe/shared";
+} from "@landrop/shared";
+import { isObject } from "@landrop/shared";
 import type { LocalIdentity } from "./deviceIdentity.js";
 
 export type PresenceDevice = {
@@ -15,6 +15,7 @@ export type PresenceDevice = {
   name: string;
   online: boolean;
   lastSeenMs: number;
+  findable: boolean;
   publicKeyJwk?: JsonWebKey;
 };
 
@@ -28,6 +29,7 @@ type Signal =
 type WsClientOptions = {
   url: string;
   identity: LocalIdentity;
+  findable: boolean;
   authToken?: string | null;
   onPresence: (devices: PresenceDevice[]) => void;
   onPairMatched: (peer: PairMatchedPeer) => void;
@@ -43,7 +45,7 @@ type ClientHandle = {
   close(): void;
   pairCreate(): Promise<PairResult>;
   pairJoin(code: string): Promise<JoinResult>;
-  updateHelloName(name: string): void;
+  updateHelloState(name: string, findable: boolean): void;
   sendSignal(peerId: DeviceId, signal: Signal): void;
   onSignalFromPeer(peerId: DeviceId, cb: (signal: Signal) => void): void;
   onAnySignal(cb: (from: DeviceId, signal: Signal) => void): () => void;
@@ -78,13 +80,14 @@ export function createWsClient(opts: WsClientOptions): ClientHandle {
     ws.send(JSON.stringify(msg));
   }
 
-  function hello(nameOverride?: string) {
+  function hello(nameOverride?: string, findableOverride?: boolean) {
     const msg: WsClientHello = {
       type: "hello",
       deviceId: opts.identity.deviceId,
       name: nameOverride ?? opts.identity.name,
       publicKeyJwk: opts.identity.publicKeyJwk,
-      authToken: opts.authToken ?? undefined
+      authToken: opts.authToken ?? undefined,
+      findable: findableOverride ?? opts.findable
     };
     send(msg);
   }
@@ -188,9 +191,9 @@ export function createWsClient(opts: WsClientOptions): ClientHandle {
         send({ type: "pair.join", code });
       });
     },
-    updateHelloName: (name) => {
+    updateHelloState: (name, findable) => {
       if (ws.readyState !== ws.OPEN) return;
-      hello(name);
+      hello(name, findable);
     },
     sendSignal: (peerId, signal) => {
       if (ws.readyState !== ws.OPEN) return;

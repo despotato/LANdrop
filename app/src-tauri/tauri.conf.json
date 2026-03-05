@@ -1,8 +1,8 @@
 {
   "$schema": "https://tauri.app/schema/config/2",
-  "productName": "SendPipe",
+  "productName": "LANdrop",
   "version": "0.1.0",
-  "identifier": "com.sendpipe.app",
+  "identifier": "com.landrop.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SendPipe",
+        "title": "LANdrop",
         "width": 980,
         "height": 760,
         "resizable": true

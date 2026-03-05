@@ -19,6 +19,6 @@ export function getProfileId(): string {
 }
 
 export function storageKey(name: string): string {
-  return `sendpipe:${getProfileId()}:${name}`;
+  return `landrop:${getProfileId()}:${name}`;
 }
 
