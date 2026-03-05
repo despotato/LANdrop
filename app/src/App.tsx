@@ -1,4 +1,4 @@
-import type { DeviceId } from "@landrop/shared";
+import type { DeviceId, DeviceType } from "@landrop/shared";
 import { deriveSafetyPhrase } from "@landrop/shared";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getOrCreateIdentity, setDeviceName, type LocalIdentity } from "./lib/deviceIdentity.js";
@@ -23,13 +23,43 @@ const DEFAULT_SIGNALING_HTTP = ENV_SIGNALING_HTTP ?? getSignalingHttpBase(DEFAUL
 type TrustedPeer = {
   deviceId: DeviceId;
   name: string;
+  deviceType?: DeviceType;
   publicKeyJwk: JsonWebKey;
   addedAtMs: number;
 };
 
+type IncomingShareRequest = {
+  requestId: string;
+  from: DeviceId;
+  fromName: string;
+  fromDeviceType?: DeviceType;
+};
+
+const DEVICE_ICON: Record<DeviceType, string> = {
+  windows: "🪟",
+  macos: "🍎",
+  linux: "🐧",
+  android: "🤖",
+  ios: "📱",
+  web: "🌐",
+  unknown: "💻"
+};
+
+function deviceTypeLabel(deviceType?: DeviceType): string {
+  if (!deviceType) return "Unknown";
+  if (deviceType === "ios") return "iOS";
+  if (deviceType === "macos") return "macOS";
+  return deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+}
+
 function loadTrustedPeers(): Record<DeviceId, TrustedPeer> {
   try {
-    return JSON.parse(localStorage.getItem(storageKey("trustedPeers")) ?? "{}") as Record<DeviceId, TrustedPeer>;
+    const parsed = JSON.parse(localStorage.getItem(storageKey("trustedPeers")) ?? "{}") as Record<DeviceId, TrustedPeer>;
+    const normalized: Record<DeviceId, TrustedPeer> = {};
+    for (const [deviceId, peer] of Object.entries(parsed)) {
+      normalized[deviceId] = { ...peer, deviceType: peer.deviceType ?? "unknown" };
+    }
+    return normalized;
   } catch {
     return {};
   }
@@ -58,18 +88,17 @@ export default function App() {
     verification_url: string;
     intervalSec: number;
   } | null>(null);
-  const [localEmail, setLocalEmail] = useState("");
-  const [localPassword, setLocalPassword] = useState("");
+  const [localEmail, setLocalEmail] = useState<string>(() => localStorage.getItem(storageKey("localEmail")) ?? "");
+  const [localPassword, setLocalPassword] = useState<string>(() => localStorage.getItem(storageKey("localPassword")) ?? "");
   const [wsError, setWsError] = useState<string | null>(null);
   const [presence, setPresence] = useState<PresenceDevice[]>([]);
-  const [pairCode, setPairCode] = useState("");
-  const [createdPairCode, setCreatedPairCode] = useState<string | null>(null);
+  const [incomingShareRequests, setIncomingShareRequests] = useState<IncomingShareRequest[]>([]);
+  const [outgoingShareRequests, setOutgoingShareRequests] = useState<Record<DeviceId, string>>({});
   const [pendingPeer, setPendingPeer] = useState<TrustedPeer | null>(null);
   const [safetyPhrase, setSafetyPhrase] = useState<string | null>(null);
 
   const [trustedPeers, setTrustedPeers] = useState<Record<DeviceId, TrustedPeer>>(() => loadTrustedPeers());
 
-  const [selectedPeerId, setSelectedPeerId] = useState<DeviceId | "">("");
   const [activePeerId, setActivePeerId] = useState<DeviceId | null>(null);
   const [pc, setPc] = useState<PeerConnectionHandle | null>(null);
   const [dcStatus, setDcStatus] = useState<string>("disconnected");
@@ -159,12 +188,19 @@ export default function App() {
   }, [authToken]);
 
   useEffect(() => {
+    localStorage.setItem(storageKey("localEmail"), localEmail);
+  }, [localEmail]);
+
+  useEffect(() => {
+    localStorage.setItem(storageKey("localPassword"), localPassword);
+  }, [localPassword]);
+
+  useEffect(() => {
     setAuthInfo((prev) => (prev ? { ...prev, authRequired: serverAuthRequired } : { authRequired: serverAuthRequired }));
   }, [serverAuthRequired]);
 
   useEffect(() => {
     if (!identity || !signalingUrl) return;
-    if (serverAuthRequired && !authToken) return;
     const client = createWsClient({
       url: signalingUrl,
       identity,
@@ -177,6 +213,20 @@ export default function App() {
         const phrase = await deriveSafetyPhrase(identity.publicKeyJwk, peer.publicKeyJwk);
         setPendingPeer({ ...peer, addedAtMs: Date.now() });
         setSafetyPhrase(phrase);
+      },
+      onShareRequest: (request) => {
+        setIncomingShareRequests((existing) => {
+          if (existing.some((r) => r.requestId === request.requestId)) return existing;
+          return [request, ...existing].slice(0, 20);
+        });
+      },
+      onShareResponse: (response) => {
+        setOutgoingShareRequests((existing) => {
+          const next = { ...existing };
+          delete next[response.from];
+          return next;
+        });
+        if (response.accepted) void connectToPeer(response.from);
       }
     });
 
@@ -190,7 +240,6 @@ export default function App() {
       const allowByTrust = !!trustedPeersRef.current[from];
       if (!pcRef.current && signal.type === "offer" && (allowByTrust || allowByAccount)) {
         setActivePeerId(from);
-        setSelectedPeerId(from);
 
         const handle = createPeerConnection({
           onSignal: (s) => client.sendSignal(from, s),
@@ -229,30 +278,13 @@ export default function App() {
 
   const peerChoices = useMemo(() => Object.values(trustedPeers), [trustedPeers]);
   const authRequired = authInfo?.authRequired ?? serverAuthRequired;
-  const canDirectConnectFromPresence = authRequired && !!authToken;
-  const connectChoices = useMemo(() => {
-    if (authRequired && authToken) {
-      return presence.filter((d) => d.deviceId !== identity?.deviceId && d.online && d.findable);
-    }
-    return peerChoices.map((p) => ({ deviceId: p.deviceId, name: p.name, online: true }));
-  }, [authRequired, authToken, presence, peerChoices, identity?.deviceId]);
-
-  async function onCreatePairCode() {
-    setWsError(null);
-    if (!identity) return;
-    const client = getWsClient();
-    const res = await client.pairCreate();
-    if (res.ok) setCreatedPairCode(res.code);
-    else setWsError(res.error);
-  }
-
-  async function onJoinPairCode() {
-    setWsError(null);
-    if (!pairCode.trim()) return;
-    const client = getWsClient();
-    const res = await client.pairJoin(pairCode.trim());
-    if (!res.ok) setWsError(res.error);
-  }
+  const myDeviceChoices = useMemo(() => {
+    if (!authToken) return [];
+    return presence.filter((d) => d.scope === "mine" && d.deviceId !== identity?.deviceId && d.online);
+  }, [authToken, presence, identity?.deviceId]);
+  const otherUserChoices = useMemo(() => {
+    return presence.filter((d) => d.scope !== "mine" && d.deviceId !== identity?.deviceId && d.online && d.findable);
+  }, [presence, identity?.deviceId]);
 
   async function startLogin() {
     setWsError(null);
@@ -320,7 +352,6 @@ export default function App() {
     const token = await derivePortableLocalToken(localEmail, localPassword);
     localStorage.setItem(storageKey("authToken"), token);
     setAuthToken(token);
-    setLocalPassword("");
   }
 
   async function localDoSignup() {
@@ -332,7 +363,6 @@ export default function App() {
     const token = await derivePortableLocalToken(localEmail, localPassword);
     localStorage.setItem(storageKey("authToken"), token);
     setAuthToken(token);
-    setLocalPassword("");
   }
 
   async function onTrustPeer() {
@@ -370,6 +400,27 @@ export default function App() {
     await handle.startAsCaller(peerId);
   }
 
+  function requestShareTo(peerId: DeviceId) {
+    const ws = getWsClient();
+    const requestId = crypto.randomUUID();
+    setOutgoingShareRequests((existing) => ({ ...existing, [peerId]: requestId }));
+    ws.sendShareRequest(peerId, requestId);
+  }
+
+  function respondToShareRequest(request: IncomingShareRequest, accepted: boolean) {
+    const ws = getWsClient();
+    ws.sendShareResponse(request.from, request.requestId, accepted);
+    setIncomingShareRequests((existing) => existing.filter((r) => r.requestId !== request.requestId));
+  }
+
+  async function onAuthPrimaryClick() {
+    if (authToken) {
+      await logout();
+      return;
+    }
+    await localDoLogin();
+  }
+
   async function disconnect() {
     pc?.close();
     transfer?.dispose();
@@ -390,261 +441,186 @@ export default function App() {
     delete next[peerId];
     setTrustedPeers(next);
     saveTrustedPeers(next);
-    if (selectedPeerId === peerId) setSelectedPeerId("");
   }
 
   if (!identity) return <div className="wrap">Loading…</div>;
 
-  const onlineOtherDevices = presence.filter((d) => d.deviceId !== identity.deviceId);
-
   return (
-    <div className="wrap app-shell">
+    <div className="wrap app-shell compact-shell">
       <header className="hero">
         <h2>LANdrop</h2>
-        <p>Fast local transfer between your devices.</p>
+        {discoveryStatus ? <small className="muted hero-status">{discoveryStatus}</small> : null}
       </header>
 
-      <div className="card">
-        <h3>Account</h3>
-        <div className="row">
-          <span className="pill">Auth: {authRequired ? "required" : "off"}</span>
-          {serverAuthRequired && !authToken ? <span className="pill">Connect waits for sign-in</span> : null}
-          {authToken ? (
-            <>
-              <span className="pill">Signed in</span>
-              <button className="btn btn-ghost" onClick={logout}>
-                Sign out
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-primary" onClick={startLogin} disabled={!!authFlow}>
-                Sign in with Google
-              </button>
-              <input
-                value={localEmail}
-                onChange={(e) => setLocalEmail(e.target.value)}
-                placeholder="Email"
-                style={{ minWidth: 220 }}
-              />
-              <input
-                value={localPassword}
-                onChange={(e) => setLocalPassword(e.target.value)}
-                placeholder="Password"
-                type="password"
-                style={{ minWidth: 220 }}
-              />
-              <button className="btn btn-primary" onClick={localDoLogin}>
-                Sign in
-              </button>
-              <button className="btn" onClick={localDoSignup}>
-                Use this account
-              </button>
-            </>
-          )}
-          <small className="muted">Signaling: {signalingUrl ?? "…"}</small>
-        </div>
-
-        {authFlow ? (
-          <div style={{ marginTop: 10 }}>
-            <div className="row">
-              <strong>Finish sign-in</strong>
-              <span className="pill">Code: {authFlow.user_code}</span>
-              <button className="btn btn-primary" onClick={() => openLoginUrl(authFlow.verification_url)}>
-                Open Google login
-              </button>
-              <button className="btn" onClick={() => setAuthFlow(null)}>
-                Cancel
-              </button>
-            </div>
-            <small className="muted">
-              Enter the code in the browser window. This app will auto-detect when you finish.
-            </small>
-          </div>
-        ) : null}
-
-        {discoveryStatus ? (
-          <div style={{ marginTop: 8 }}>
-            <small className="muted">{discoveryStatus}</small>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="card">
-        <div className="row">
-          <strong>Device</strong>
-          <span className="pill">{identity.deviceId.slice(0, 8)}</span>
-          <input
-            value={deviceName}
-            onChange={(e) => {
-              const name = e.target.value;
-              setDeviceNameState(name);
-              setDeviceName(name);
-              getWsClient().updateHelloState(name, findable);
-            }}
-            placeholder="Device name"
-          />
-          <label className="row" style={{ gap: 6 }}>
+      <div className="card compact-strip">
+        <div className="top-strip-row">
+          <div className="top-group">
+            <span className="pill">ID {identity.deviceId.slice(0, 6)}</span>
             <input
-              type="checkbox"
-              checked={findable}
+              className="device-input"
+              value={deviceName}
               onChange={(e) => {
-                const next = e.target.checked;
+                const name = e.target.value;
+                setDeviceNameState(name);
+                setDeviceName(name);
+                getWsClient().updateHelloState(name, findable);
+              }}
+              placeholder="Device"
+            />
+            <button
+              className={`toggle ${findable ? "is-on" : ""}`}
+              onClick={() => {
+                const next = !findable;
                 setFindable(next);
                 localStorage.setItem(storageKey("findable"), next ? "1" : "0");
                 try {
                   getWsClient().updateHelloState(deviceName, next);
-                } catch {
-                  // not connected yet
-                }
+                } catch {}
               }}
+            >
+              <span className="toggle-dot" />
+              <span>{findable ? "Findable" : "Hidden"}</span>
+            </button>
+          </div>
+          <div className="top-group top-actions">
+            {authToken ? (
+              <>
+                <button className="btn btn-ghost" onClick={onAuthPrimaryClick}>
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-primary" onClick={onAuthPrimaryClick}>
+                  Sign in
+                </button>
+                <button className="btn" onClick={startLogin} disabled={!!authFlow}>
+                  Google
+                </button>
+              </>
+            )}
+            <button className="btn" disabled={!pc} onClick={disconnect}>
+              {pc ? "Disconnect" : "Disconnected"}
+            </button>
+          </div>
+        </div>
+        {!authToken ? (
+          <div className="row section-gap top-auth-row">
+            <input className="control-input" value={localEmail} onChange={(e) => setLocalEmail(e.target.value)} placeholder="Email" />
+            <input
+              className="control-input"
+              value={localPassword}
+              onChange={(e) => setLocalPassword(e.target.value)}
+              placeholder="Password"
+              type="password"
             />
-            <small className="muted">Findable</small>
-          </label>
-          <small className="muted">Signaling: {signalingUrl ?? "…"}</small>
-        </div>
-        {findable ? (
-          <small className="muted">Findable ON: same-account devices can connect directly without pair codes.</small>
-        ) : (
-          <small className="muted">Findable OFF: this device is hidden from discovery and direct targeting.</small>
-        )}
-        {wsError ? <p style={{ color: "tomato" }}>{wsError}</p> : null}
-      </div>
-
-      {!findable ? <div className="card">
-        <h3>Pairing (optional)</h3>
-        <div className="row">
-          <button className="btn btn-primary" onClick={onCreatePairCode}>
-            Create pairing code
-          </button>
-          {createdPairCode ? (
-            <span>
-              Code: <strong style={{ fontSize: 18 }}>{createdPairCode}</strong>
-            </span>
-          ) : null}
-        </div>
-        <div className="row" style={{ marginTop: 10 }}>
-          <input value={pairCode} onChange={(e) => setPairCode(e.target.value)} placeholder="Enter code" />
-          <button className="btn btn-primary" onClick={onJoinPairCode}>
-            Join
-          </button>
-        </div>
-
-        {pendingPeer ? (
-          <div style={{ marginTop: 10 }}>
-            <div className="row">
-              <strong>Verify safety phrase</strong>
-              <span className="pill">{pendingPeer.name}</span>
-            </div>
-            <p style={{ margin: "8px 0" }}>
-              <code>{safetyPhrase ?? "…"}</code>
-            </p>
-            <div className="row">
-              <button className="btn btn-primary" onClick={onTrustPeer}>
-                Trust peer
-              </button>
-              <button
-                className="btn"
-                onClick={() => {
-                  setPendingPeer(null);
-                  setSafetyPhrase(null);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-            <small className="muted">
-              Note: this MVP does not yet sign/encrypt signaling; phrase is a user check.
+          </div>
+        ) : null}
+        {authFlow ? (
+          <div className="row section-gap">
+            <span className="pill">{authFlow.user_code}</span>
+            <button className="btn btn-primary" onClick={() => openLoginUrl(authFlow.verification_url)}>
+              Open Login
+            </button>
+            <button className="btn" onClick={() => setAuthFlow(null)}>
+              Cancel
+            </button>
+          </div>
+        ) : null}
+        {wsError ? (
+          <div className="top-alert">
+            <span className="pill pill-error">⚠</span>
+            <small className="muted" style={{ color: "tomato" }}>
+              {wsError}
             </small>
           </div>
         ) : null}
-      </div> : null}
-
-      <div className="card">
-        <h3>Presence</h3>
-        <ul className="list">
-          {onlineOtherDevices.map((d) => (
-            <li className="list-item" key={d.deviceId}>
-              <span>
-                {d.name} <small className="muted">({d.deviceId.slice(0, 8)})</small> {d.online ? "online" : "offline"}
-              </span>
-              {canDirectConnectFromPresence
-                ? (activePeerId === d.deviceId ? (
-                    <button className="btn" style={{ marginLeft: 8 }} onClick={() => void disconnectDevice(d.deviceId)}>
-                      Disconnect
-                    </button>
-                  ) : (
-                    <button
-                      className="btn btn-primary"
-                      style={{ marginLeft: 8 }}
-                      onClick={() => connectToPeer(d.deviceId)}
-                      disabled={!!pc}
-                    >
-                      Connect
-                    </button>
-                  ))
-                : null}
-            </li>
-          ))}
-        </ul>
       </div>
 
-      <div className="card">
-        <h3>Saved Connections</h3>
-        {peerChoices.length === 0 ? <small className="muted">No saved devices yet.</small> : null}
-        <ul className="list">
-          {peerChoices.map((peer) => (
-            <li className="list-item" key={peer.deviceId}>
-              <span>
-                {peer.name} <small className="muted">({peer.deviceId.slice(0, 8)})</small>
-              </span>
-              {activePeerId === peer.deviceId ? (
-                <button className="btn" style={{ marginLeft: 8 }} onClick={() => void disconnectDevice(peer.deviceId)}>
-                  Disconnect
-                </button>
-              ) : (
+      <div className="panel-grid">
+        <section className="card panel">
+          <div className="panel-head">
+            <h3>My Devices</h3>
+            <span className="pill">{myDeviceChoices.length}</span>
+          </div>
+          {!authToken ? <small className="muted note">Sign in to load devices.</small> : null}
+          <div className="device-grid section-gap">
+            {myDeviceChoices.map((peer) => (
+              <div className={`device-card ${activePeerId === peer.deviceId ? "is-active" : ""}`} key={peer.deviceId}>
+                <div className="device-inline">
+                  <span className="device-icon" aria-hidden>
+                    {DEVICE_ICON[peer.deviceType ?? "unknown"]}
+                  </span>
+                  <div>
+                    <div>{peer.name}</div>
+                    <small className="muted">{peer.deviceId.slice(0, 8)}</small>
+                  </div>
+                </div>
+                {activePeerId === peer.deviceId ? (
+                  <span className="pill">Connected</span>
+                ) : (
+                  <button className="btn btn-primary" disabled={!!pc} onClick={() => connectToPeer(peer.deviceId)}>
+                    Connect
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="card panel">
+          <div className="panel-head">
+            <h3>Other Users</h3>
+            <span className="pill">{otherUserChoices.length}</span>
+          </div>
+          <div className="device-grid section-gap">
+            {otherUserChoices.map((peer) => (
+              <div className="device-card" key={peer.deviceId}>
+                <div className="device-inline">
+                  <span className="device-icon" aria-hidden>
+                    {DEVICE_ICON[peer.deviceType ?? "unknown"]}
+                  </span>
+                  <div>
+                    <div>{peer.name}</div>
+                    <small className="muted">{deviceTypeLabel(peer.deviceType)}</small>
+                  </div>
+                </div>
                 <button
                   className="btn btn-primary"
-                  style={{ marginLeft: 8 }}
-                  onClick={() => connectToPeer(peer.deviceId)}
-                  disabled={!!pc}
+                  disabled={!!pc || !!outgoingShareRequests[peer.deviceId]}
+                  onClick={() => requestShareTo(peer.deviceId)}
                 >
-                  Connect
+                  {outgoingShareRequests[peer.deviceId] ? "Pending" : "Request"}
                 </button>
-              )}
-              <button className="btn btn-danger" style={{ marginLeft: 8 }} onClick={() => void forgetDevice(peer.deviceId)}>
-                Forget
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="card">
-        <h3>Phase 2/3: Connect + Transfer</h3>
-        <div className="row">
-          <select value={selectedPeerId} onChange={(e) => setSelectedPeerId(e.target.value as any)}>
-            <option value="">Select device…</option>
-            {connectChoices.map((p) => (
-              <option value={p.deviceId} key={p.deviceId}>
-                {p.name} ({p.deviceId.slice(0, 6)})
-              </option>
+              </div>
             ))}
-          </select>
-          <button
-            className="btn btn-primary"
-            disabled={!selectedPeerId || !!pc}
-            onClick={() => connectToPeer(selectedPeerId as DeviceId)}
-          >
-            Connect
-          </button>
-          <button className="btn" disabled={!pc} onClick={disconnect}>
-            Disconnect
-          </button>
-          <span className="pill">Status: {dcStatus}</span>
-        </div>
+          </div>
 
-        {transfer ? <TransferUi transfer={transfer} /> : <small className="muted">Connect to send files.</small>}
+          {incomingShareRequests.length > 0 ? (
+            <ul className="list section-gap">
+              {incomingShareRequests.map((request) => (
+                <li className="list-item" key={request.requestId}>
+                  <span className="device-inline">
+                    <span className="device-icon" aria-hidden>
+                      {DEVICE_ICON[request.fromDeviceType ?? "unknown"]}
+                    </span>
+                    <span>{request.fromName}</span>
+                  </span>
+                  <span className="row">
+                    <button className="btn btn-primary" onClick={() => respondToShareRequest(request, true)}>
+                      ✓
+                    </button>
+                    <button className="btn" onClick={() => respondToShareRequest(request, false)}>
+                      ✕
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="section-gap">{transfer ? <TransferUi transfer={transfer} /> : null}</div>
+        </section>
       </div>
     </div>
   );

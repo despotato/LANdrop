@@ -1,4 +1,5 @@
 import type {
+  DeviceType,
   DeviceId,
   IceCandidateInit,
   WsClientHello,
@@ -13,13 +14,15 @@ import type { LocalIdentity } from "./deviceIdentity.js";
 export type PresenceDevice = {
   deviceId: DeviceId;
   name: string;
+  deviceType?: DeviceType;
+  scope?: "mine" | "other";
   online: boolean;
   lastSeenMs: number;
   findable: boolean;
   publicKeyJwk?: JsonWebKey;
 };
 
-export type PairMatchedPeer = { deviceId: DeviceId; name: string; publicKeyJwk: JsonWebKey };
+export type PairMatchedPeer = { deviceId: DeviceId; name: string; deviceType?: DeviceType; publicKeyJwk: JsonWebKey };
 
 type Signal =
   | { type: "offer"; sdp: string }
@@ -35,6 +38,8 @@ type WsClientOptions = {
   onPairMatched: (peer: PairMatchedPeer) => void;
   onError: (message: string) => void;
   onWelcome?: (welcome: { authRequired: boolean; user?: { sub: string; email?: string; name?: string; picture?: string } }) => void;
+  onShareRequest?: (request: { from: DeviceId; requestId: string; fromName: string; fromDeviceType?: DeviceType }) => void;
+  onShareResponse?: (response: { from: DeviceId; requestId: string; accepted: boolean }) => void;
 };
 
 type PairResult = { ok: true; code: string } | { ok: false; error: string };
@@ -47,6 +52,8 @@ type ClientHandle = {
   pairJoin(code: string): Promise<JoinResult>;
   updateHelloState(name: string, findable: boolean): void;
   sendSignal(peerId: DeviceId, signal: Signal): void;
+  sendShareRequest(peerId: DeviceId, requestId: string): void;
+  sendShareResponse(peerId: DeviceId, requestId: string, accepted: boolean): void;
   onSignalFromPeer(peerId: DeviceId, cb: (signal: Signal) => void): void;
   onAnySignal(cb: (from: DeviceId, signal: Signal) => void): () => void;
 };
@@ -86,6 +93,7 @@ export function createWsClient(opts: WsClientOptions): ClientHandle {
       type: "hello",
       deviceId: opts.identity.deviceId,
       name: nameOverride ?? opts.identity.name,
+      deviceType: opts.identity.deviceType,
       publicKeyJwk: opts.identity.publicKeyJwk,
       authToken: opts.authToken ?? undefined,
       findable: findableOverride ?? opts.findable
@@ -114,6 +122,17 @@ export function createWsClient(opts: WsClientOptions): ClientHandle {
       opts.onWelcome?.({ authRequired: msg.authRequired, user: (msg as any).user });
     }
     if (msg.type === "pair.matched") opts.onPairMatched(msg.peer);
+    if (msg.type === "share.request") {
+      opts.onShareRequest?.({
+        from: msg.from,
+        requestId: msg.requestId,
+        fromName: msg.fromName,
+        fromDeviceType: (msg as any).fromDeviceType
+      });
+    }
+    if (msg.type === "share.response") {
+      opts.onShareResponse?.({ from: msg.from, requestId: msg.requestId, accepted: msg.accepted });
+    }
 
     if (msg.type === "webrtc.offer") {
       const m = msg as WsWebrtcOffer & { from: DeviceId };
@@ -206,6 +225,14 @@ export function createWsClient(opts: WsClientOptions): ClientHandle {
       if (signal.type === "offer") send({ type: "webrtc.offer", to: peerId, sdp: signal.sdp });
       if (signal.type === "answer") send({ type: "webrtc.answer", to: peerId, sdp: signal.sdp });
       if (signal.type === "ice") send({ type: "webrtc.ice", to: peerId, candidate: signal.candidate });
+    },
+    sendShareRequest: (peerId, requestId) => {
+      if (ws.readyState !== ws.OPEN) return;
+      send({ type: "share.request", to: peerId, requestId });
+    },
+    sendShareResponse: (peerId, requestId, accepted) => {
+      if (ws.readyState !== ws.OPEN) return;
+      send({ type: "share.response", to: peerId, requestId, accepted });
     },
     onSignalFromPeer: (peerId, cb) => {
       const set = signalListeners.get(peerId) ?? new Set();

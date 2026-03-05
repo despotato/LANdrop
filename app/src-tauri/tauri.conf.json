@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "LANdrop",
-        "width": 980,
-        "height": 760,
+        "width": 860,
+        "height": 620,
+        "minWidth": 760,
+        "minHeight": 560,
         "resizable": true
       }
     ],
@@ -23,4 +25,3 @@
     }
   }
 }
-

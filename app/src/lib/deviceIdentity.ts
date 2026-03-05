@@ -1,8 +1,10 @@
+import type { DeviceType } from "@landrop/shared";
 import { storageKey } from "./storage.js";
 
 export type LocalIdentity = {
   deviceId: string;
   name: string;
+  deviceType: DeviceType;
   publicKeyJwk: JsonWebKey;
 };
 
@@ -24,6 +26,17 @@ async function ensureKeypair(): Promise<JsonWebKey> {
   return jwk;
 }
 
+function detectDeviceType(): DeviceType {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes("android")) return "android";
+  if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) return "ios";
+  if (ua.includes("windows")) return "windows";
+  if (ua.includes("mac os x") || ua.includes("macintosh")) return "macos";
+  if (ua.includes("linux")) return "linux";
+  if (ua.includes("tauri") || ua.includes("mozilla")) return "web";
+  return "unknown";
+}
+
 export async function getOrCreateIdentity(): Promise<LocalIdentity> {
   const deviceId = localStorage.getItem(storageKey("deviceId")) ?? crypto.randomUUID();
   localStorage.setItem(storageKey("deviceId"), deviceId);
@@ -31,8 +44,9 @@ export async function getOrCreateIdentity(): Promise<LocalIdentity> {
   const name = localStorage.getItem(storageKey("deviceName")) ?? defaultName();
   localStorage.setItem(storageKey("deviceName"), name);
 
+  const deviceType = detectDeviceType();
   const publicKeyJwk = await ensureKeypair();
-  return { deviceId, name, publicKeyJwk };
+  return { deviceId, name, deviceType, publicKeyJwk };
 }
 
 export function setDeviceName(name: string) {

@@ -18,6 +18,20 @@ Transfer handshake hardened: sender waits for explicit receiver acceptance befor
 Session lifecycle improved: local sign-in/sign-out now updates auth state without full window reload; auth-required/no-token state clears active peer session and presence.
 Connection management expanded: per-device connect/disconnect actions in Presence, plus Saved Connections with per-device forget.
 UI refreshed: moved to a cleaner modern visual system (glass cards, styled controls, simplified hierarchy, subtle motion transitions).
+Device connect UX refreshed: replaced the connect dropdown with a live device grid and platform icons (Windows/macOS/Linux/Android/iOS/Web) derived from detected device type.
+UI density pass: removed redundant signaling/presence clutter, tightened card spacing, standardized control sizes, and replaced the checkbox-style findable control with a modern toggle button.
+Discovery UX clarified: "Saved Connections" was renamed/scoped to "Trusted Devices (Pairing)" (non-account mode), while account mode now emphasizes "Available Devices" with same-account + findable guidance.
+Information architecture updated: app now separates discovery into "My Devices" (same-account LAN discovery) and "Other Users" (pairing/trusted users + incoming transfer requests), reducing ambiguity and text clutter.
+Compact app pass: reduced top/bottom whitespace, tightened card/control spacing, simplified the header, and lowered default Tauri window size to better fit a focused file-transfer workflow.
+Share flow updated: same-account devices are visible without pairing codes; cross-account sharing now uses request/approve semantics (`Other Users`) with `Findable` gating instead of code entry.
+Layout updated: account+device controls are a compact top strip, while `My Devices` and `Other Users` are side-by-side scrollable panels; outer app surface remains non-scrollable.
+UI simplification pass: reduced instructional text, replaced repeated labels with icon/state chips, and kept interactions action-first for fast file-sharing use.
+Top-bar polish: reworked the compact strip into grouped controls (identity/device/findable vs auth/actions), condensed auth inputs into a secondary row, and turned connection errors into a compact alert chip.
+Top controls simplified further: removed redundant signed-in/disconnect status pills and switched to single stateful action buttons (`Sign in/Sign out`, `Disconnect/Disconnected`).
+Credential persistence adjusted: local email/password fields are now persisted in profile-scoped local storage and retained across sign-in/sign-out so new sessions can reuse the same credentials.
+Panel layout lock: `My Devices` and `Other Users` remain side-by-side in desktop app layout (removed responsive single-column collapse).
+Account matching fix: server now honors portable `local:*` auth token scope even when strict auth mode is off, so same email/password devices correctly appear under `My Devices` after sign-in.
+Guest visibility refinement: non-logged-in devices can be discoverable (`Findable`) and requestable, but are never treated as the same account scope (only explicit `local:*` token matches count as same account).
 
 ## Planned Next Phase (Local Account Matching MVP)
 Goal: keep the UX “sign in once, see devices, send instantly” without introducing an external database service yet.

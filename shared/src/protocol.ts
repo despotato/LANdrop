@@ -1,6 +1,7 @@
 export type DeviceId = string;
 export type PairCode = string;
 export type FileId = string;
+export type DeviceType = "windows" | "macos" | "linux" | "android" | "ios" | "web" | "unknown";
 
 export type IceCandidateInit = {
   candidate?: string;
@@ -13,6 +14,7 @@ export type WsClientHello = {
   type: "hello";
   deviceId: DeviceId;
   name: string;
+  deviceType?: DeviceType;
   publicKeyJwk: JsonWebKey;
   authToken?: string;
   findable?: boolean;
@@ -30,6 +32,8 @@ export type WsPresence = {
   devices: Array<{
     deviceId: DeviceId;
     name: string;
+    deviceType?: DeviceType;
+    scope?: "mine" | "other";
     online: boolean;
     lastSeenMs: number;
     findable: boolean;
@@ -55,12 +59,40 @@ export type WsPairJoin = {
 export type WsPairMatched = {
   type: "pair.matched";
   sessionId: string;
-  peer: { deviceId: DeviceId; name: string; publicKeyJwk: JsonWebKey };
+  peer: { deviceId: DeviceId; name: string; deviceType?: DeviceType; publicKeyJwk: JsonWebKey };
 };
 
 export type WsError = {
   type: "error";
   message: string;
+};
+
+export type WsShareRequest = {
+  type: "share.request";
+  to: DeviceId;
+  requestId: string;
+};
+
+export type WsShareRequestForward = {
+  type: "share.request";
+  from: DeviceId;
+  requestId: string;
+  fromName: string;
+  fromDeviceType?: DeviceType;
+};
+
+export type WsShareResponse = {
+  type: "share.response";
+  to: DeviceId;
+  requestId: string;
+  accepted: boolean;
+};
+
+export type WsShareResponseForward = {
+  type: "share.response";
+  from: DeviceId;
+  requestId: string;
+  accepted: boolean;
 };
 
 export type WsWebrtcOffer = {
@@ -85,6 +117,8 @@ export type WsClientMessage =
   | WsClientHello
   | WsPairCreate
   | WsPairJoin
+  | WsShareRequest
+  | WsShareResponse
   | WsWebrtcOffer
   | WsWebrtcAnswer
   | WsWebrtcIce;
@@ -95,6 +129,8 @@ export type WsServerMessage =
   | WsPairCreated
   | WsPairMatched
   | WsError
+  | WsShareRequestForward
+  | WsShareResponseForward
   | (WsWebrtcOffer & { from: DeviceId })
   | (WsWebrtcAnswer & { from: DeviceId })
   | (WsWebrtcIce & { from: DeviceId });

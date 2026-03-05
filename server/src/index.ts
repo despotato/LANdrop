@@ -4,6 +4,7 @@ import dgram from "node:dgram";
 import { URL } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import type {
+  DeviceType,
   DeviceId,
   PairCode,
   WsClientHello,
@@ -25,6 +26,7 @@ type Session = {
 type DeviceRecord = {
   deviceId: DeviceId;
   name: string;
+  deviceType: DeviceType;
   publicKeyJwk: JsonWebKeyLike;
   ws: WebSocket;
   lastSeenMs: number;
@@ -42,10 +44,17 @@ type PairSession = {
   userSub: string | null;
 };
 
+type ShareApproval = {
+  a: DeviceId;
+  b: DeviceId;
+  expiresAtMs: number;
+};
+
 const PORT = Number(process.env.PORT ?? "8787");
 const DISCOVERY_PORT = Number(process.env.DISCOVERY_PORT ?? "8788");
 const LAN_DISCOVERY = process.env.LAN_DISCOVERY !== "0";
 const PAIR_TTL_MS = 5 * 60 * 1000;
+const SHARE_APPROVAL_TTL_MS = 2 * 60 * 1000;
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? "";
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "1";
@@ -58,6 +67,7 @@ const sessions = new Map<string, Session>();
 const localUsers = new Map<string, LocalUser>(); // email -> user
 const devices = new Map<DeviceId, DeviceRecord>();
 const pairSessions = new Map<PairCode, PairSession>();
+const shareApprovals = new Map<string, ShareApproval>();
 
 function nowMs(): number {
   return Date.now();
@@ -110,21 +120,27 @@ function getUserSubForDevice(deviceId: DeviceId): string | null {
   return devices.get(deviceId)?.userSub ?? null;
 }
 
-function broadcastPresence(userSub: string | null): void {
-  const snapshot = Array.from(devices.values())
-    .filter((d) => d.userSub === userSub && d.findable)
-    .map((d) => ({
-      deviceId: d.deviceId,
-      name: d.name,
-      online: d.ws.readyState === WebSocket.OPEN,
-      lastSeenMs: d.lastSeenMs,
-      findable: d.findable,
-      publicKeyJwk: d.publicKeyJwk
-    }));
-
-  const msg: WsServerMessage = { type: "presence", devices: snapshot };
-  for (const d of devices.values()) {
-    if (d.userSub === userSub) safeSend(d.ws, msg);
+function broadcastPresence(): void {
+  const all = Array.from(devices.values());
+  for (const receiver of all) {
+    const snapshot = all
+      .filter((d) => {
+        if (d.deviceId === receiver.deviceId) return false;
+        if (d.userSub && receiver.userSub && d.userSub === receiver.userSub) return true;
+        return d.findable;
+      })
+      .map((d) => ({
+        deviceId: d.deviceId,
+        name: d.name,
+        deviceType: d.deviceType,
+        scope: (d.userSub && receiver.userSub && d.userSub === receiver.userSub ? "mine" : "other") as "mine" | "other",
+        online: d.ws.readyState === WebSocket.OPEN,
+        lastSeenMs: d.lastSeenMs,
+        findable: d.findable,
+        publicKeyJwk: d.publicKeyJwk
+      }));
+    const msg: WsServerMessage = { type: "presence", devices: snapshot };
+    safeSend(receiver.ws, msg);
   }
 }
 
@@ -133,6 +149,28 @@ function cleanupExpiredPairs(): void {
   for (const [code, session] of pairSessions) {
     if (session.expiresAtMs <= t) pairSessions.delete(code);
   }
+}
+
+function approvalKey(a: DeviceId, b: DeviceId): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+function cleanupExpiredApprovals(): void {
+  const t = nowMs();
+  for (const [key, approval] of shareApprovals) {
+    if (approval.expiresAtMs <= t) shareApprovals.delete(key);
+  }
+}
+
+function hasShareApproval(a: DeviceId, b: DeviceId): boolean {
+  const key = approvalKey(a, b);
+  const approval = shareApprovals.get(key);
+  if (!approval) return false;
+  if (approval.expiresAtMs <= nowMs()) {
+    shareApprovals.delete(key);
+    return false;
+  }
+  return true;
 }
 
 function issueSession(user: User): Session {
@@ -375,6 +413,7 @@ wss.on("connection", (ws) => {
   ws.on("message", (data) => {
     cleanupExpiredPairs();
     cleanupExpiredSessions();
+    cleanupExpiredApprovals();
 
     let msg: WsClientMessage;
     try {
@@ -386,21 +425,14 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "hello") {
       const hello = msg as WsClientHello;
+      const token = hello.authToken ? String(hello.authToken) : "";
 
-      if (AUTH_REQUIRED) {
-        const token = hello.authToken ? String(hello.authToken) : "";
-        if (LOCAL_AUTH_ENABLED && LOCAL_AUTH_PORTABLE && token.startsWith("local:") && token.length > "local:".length) {
-          // Portable LAN auth: token itself defines the account scope (shared secret).
-          userSub = token;
-        } else {
-          const session = token ? sessions.get(token) : undefined;
-          if (!session || session.expiresAtMs <= nowMs()) {
-            safeSend(ws, { type: "error", message: "Auth required (invalid session)" });
-            ws.close();
-            return;
-          }
-          userSub = session.user.sub;
-        }
+      if (token.startsWith("local:") && token.length > "local:".length) {
+        // Portable account scope for same email/password matching across LAN.
+        userSub = token;
+      } else if (AUTH_REQUIRED) {
+        const session = token ? sessions.get(token) : undefined;
+        userSub = session && session.expiresAtMs > nowMs() ? session.user.sub : null;
       } else {
         userSub = null;
       }
@@ -409,6 +441,7 @@ wss.on("connection", (ws) => {
       devices.set(hello.deviceId, {
         deviceId: hello.deviceId,
         name: hello.name,
+        deviceType: hello.deviceType ?? "unknown",
         publicKeyJwk: hello.publicKeyJwk,
         ws,
         lastSeenMs: nowMs(),
@@ -427,7 +460,7 @@ wss.on("connection", (ws) => {
       console.log(
         `[signaling] hello ${hello.deviceId.slice(0, 8)} user=${userSub ? userSub.slice(0, 8) : "none"} name="${hello.name}" findable=${hello.findable ?? true}`
       );
-      broadcastPresence(userSub);
+      broadcastPresence();
       return;
     }
 
@@ -496,7 +529,7 @@ wss.on("connection", (ws) => {
         safeSend(initiator.ws, {
           type: "pair.matched",
           sessionId: session.sessionId,
-          peer: { deviceId: joiner.deviceId, name: joiner.name, publicKeyJwk: joiner.publicKeyJwk }
+          peer: { deviceId: joiner.deviceId, name: joiner.name, deviceType: joiner.deviceType, publicKeyJwk: joiner.publicKeyJwk }
         });
         safeSend(joiner.ws, {
           type: "pair.matched",
@@ -504,11 +537,50 @@ wss.on("connection", (ws) => {
           peer: {
             deviceId: initiator.deviceId,
             name: initiator.name,
+            deviceType: initiator.deviceType,
             publicKeyJwk: initiator.publicKeyJwk
           }
         });
 
         pairSessions.delete(session.code);
+        return;
+      }
+      case "share.request": {
+        const target = devices.get(msg.to);
+        if (!target) {
+          safeSend(ws, { type: "error", message: "Target offline" });
+          return;
+        }
+        const sameAccount = !!userSub && target.userSub === userSub;
+        if (!target.findable && !sameAccount) {
+          safeSend(ws, { type: "error", message: "Target is not findable" });
+          return;
+        }
+        safeSend(target.ws, {
+          type: "share.request",
+          from: deviceId,
+          requestId: msg.requestId,
+          fromName: devices.get(deviceId)?.name ?? "Unknown",
+          fromDeviceType: devices.get(deviceId)?.deviceType ?? "unknown"
+        });
+        return;
+      }
+      case "share.response": {
+        const target = devices.get(msg.to);
+        if (!target) {
+          safeSend(ws, { type: "error", message: "Requester offline" });
+          return;
+        }
+        if (msg.accepted) {
+          const key = approvalKey(deviceId, msg.to);
+          shareApprovals.set(key, { a: deviceId, b: msg.to, expiresAtMs: nowMs() + SHARE_APPROVAL_TTL_MS });
+        }
+        safeSend(target.ws, {
+          type: "share.response",
+          from: deviceId,
+          requestId: msg.requestId,
+          accepted: msg.accepted
+        });
         return;
       }
       case "webrtc.offer":
@@ -524,13 +596,15 @@ wss.on("connection", (ws) => {
           safeSend(ws, { type: "error", message: "Target offline" });
           return;
         }
-        if (!target.findable) {
+        const sameAccount = AUTH_REQUIRED && userSub && target.userSub === userSub;
+        if (!target.findable && !sameAccount) {
           safeSend(ws, { type: "error", message: "Target is not findable" });
           return;
         }
         if (AUTH_REQUIRED) {
           const fromUser = getUserSubForDevice(deviceId);
-          if (!fromUser || target.userSub !== fromUser) {
+          const sameAccount = !!fromUser && target.userSub === fromUser;
+          if (!sameAccount && !hasShareApproval(deviceId, to)) {
             safeSend(ws, { type: "error", message: "Not allowed" });
             return;
           }
@@ -548,7 +622,7 @@ wss.on("connection", (ws) => {
     if (deviceId) {
       const record = devices.get(deviceId);
       devices.delete(deviceId);
-      if (record) broadcastPresence(record.userSub);
+      if (record) broadcastPresence();
     }
   });
 });
