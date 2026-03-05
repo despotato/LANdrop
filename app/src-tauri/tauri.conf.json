@@ -1,0 +1,26 @@
+{
+  "$schema": "https://tauri.app/schema/config/2",
+  "productName": "SendPipe",
+  "version": "0.1.0",
+  "identifier": "com.sendpipe.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SendPipe",
+        "width": 980,
+        "height": 760,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
+
