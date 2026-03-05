@@ -1,25 +1,66 @@
 :root {
-  color-scheme: light dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+  color-scheme: dark light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
     "Segoe UI Emoji";
+  --bg-1: #0b1020;
+  --bg-2: #101935;
+  --surface: rgba(18, 26, 52, 0.7);
+  --surface-border: rgba(151, 170, 255, 0.24);
+  --text: #eef2ff;
+  --muted: #aeb8dc;
+  --primary: #7c92ff;
+  --primary-strong: #5f79ff;
+  --danger: #ff6b8b;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(124, 146, 255, 0.22), transparent),
+    radial-gradient(800px 500px at 80% 0%, rgba(74, 222, 255, 0.16), transparent),
+    linear-gradient(180deg, var(--bg-1), var(--bg-2));
 }
 
 .wrap {
-  max-width: 980px;
-  margin: 24px auto;
+  max-width: 960px;
+  margin: 24px auto 40px;
   padding: 0 16px;
 }
 
+.app-shell {
+  animation: fade-in 340ms ease-out;
+}
+
+.hero {
+  margin-bottom: 16px;
+}
+
+.hero h2 {
+  margin: 0;
+  font-size: 1.9rem;
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
 .card {
-  border: 1px solid color-mix(in oklab, CanvasText 15%, Canvas 85%);
-  border-radius: 12px;
-  padding: 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+  padding: 16px;
   margin-bottom: 12px;
-  background: color-mix(in oklab, Canvas 92%, CanvasText 8%);
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.22);
+  animation: rise-in 260ms ease-out;
 }
 
 .row {
@@ -32,26 +73,119 @@ body {
 input,
 button,
 select {
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in oklab, CanvasText 20%, Canvas 80%);
-  background: Canvas;
-  color: CanvasText;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(176, 190, 255, 0.25);
+  background: rgba(13, 20, 43, 0.78);
+  color: var(--text);
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+input::placeholder {
+  color: #8f9bcb;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: none;
+  border-color: rgba(124, 146, 255, 0.75);
+  box-shadow: 0 0 0 3px rgba(124, 146, 255, 0.24);
 }
 
 button {
   cursor: pointer;
 }
 
+button:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn {
+  font-weight: 600;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--primary), var(--primary-strong));
+  border-color: transparent;
+  color: #f8faff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 10px 24px rgba(95, 121, 255, 0.35);
+}
+
+.btn-ghost {
+  background: rgba(124, 146, 255, 0.16);
+}
+
+.btn-danger {
+  background: rgba(255, 107, 139, 0.15);
+  border-color: rgba(255, 107, 139, 0.35);
+  color: #ffd9e3;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 107, 139, 0.24);
+}
+
 small.muted {
-  opacity: 0.75;
+  color: var(--muted);
 }
 
 .pill {
   font-size: 12px;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklab, CanvasText 20%, Canvas 80%);
-  opacity: 0.9;
+  border: 1px solid rgba(190, 201, 255, 0.28);
+  background: rgba(117, 132, 186, 0.18);
 }
 
+.list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(180, 194, 255, 0.18);
+  background: rgba(13, 20, 43, 0.48);
+  animation: fade-in 200ms ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

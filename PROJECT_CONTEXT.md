@@ -15,6 +15,51 @@ LAN discovery started: server responds to UDP discovery; app auto-finds the loca
 Dev convenience: Tauri can auto-start the Node signaling server if none is found on LAN (spawns `npm run dev -w @landrop/server`).
 Auth gating: when LAN server requires auth, the app delays opening the WebSocket until after sign-in.
 Transfer handshake hardened: sender waits for explicit receiver acceptance before chunking; cancel/timeout paths are implemented on both sides.
+Session lifecycle improved: local sign-in/sign-out now updates auth state without full window reload; auth-required/no-token state clears active peer session and presence.
+Connection management expanded: per-device connect/disconnect actions in Presence, plus Saved Connections with per-device forget.
+UI refreshed: moved to a cleaner modern visual system (glass cards, styled controls, simplified hierarchy, subtle motion transitions).
+
+## Planned Next Phase (Local Account Matching MVP)
+Goal: keep the UX “sign in once, see devices, send instantly” without introducing an external database service yet.
+
+### Product behavior (what user sees)
+- Sign in with email + password on each device.
+- After sign-in, app auto-connects to LAN signaling and shows only devices in the same account scope.
+- “Findable” toggle controls discoverability per device (ON = visible/receivable, OFF = hidden/reject direct connect).
+- Device list supports per-device actions:
+  - Disconnect this device (drops active session for that target only).
+  - Forget this device (remove remembered/trusted relation locally).
+- Auto-login on app reopen using persisted local session.
+- Sign out revokes local session and disconnects from signaling/peers.
+
+### Authentication model (MVP without external DB)
+- Keep portable local account scope token derived from normalized `email:password`.
+- Treat that derived token as the account key used for presence scoping and pairing authorization.
+- Do not send raw password over WebSocket signaling; token only.
+- Persist only session/token material locally (OS keychain target later; localStorage fallback for dev).
+
+### Security posture (explicit)
+- This is a LAN-first convenience auth model, not production-grade identity.
+- Anyone who knows the same email+password can impersonate that account on LAN.
+- No recovery/reset/email verification/rate limiting in this phase.
+- Next hardening phase should replace this with real server-verified auth + persistent user store.
+
+### Implementation phases
+1. Session lifecycle and startup flow
+   - App boot order: restore session -> discover LAN server -> connect WS -> publish presence.
+   - Ensure reconnect path preserves account scope after temporary disconnects.
+2. Device-state features
+   - Finalize findable toggle behavior end-to-end (presence visibility + connect gating).
+   - Persist editable device name and apply immediately without full app restart.
+3. Connection management UX
+   - Add per-device “disconnect” and “forget” actions in UI.
+   - On local sign-out: close active peer/data channels, clear auth token, clear presence state.
+4. Stability and observability
+   - Add structured logs for auth/session/connect/disconnect events.
+   - Add guardrails for stale sessions and duplicate device instances.
+5. Documentation and migration notes
+   - Document environment flags and exact behavior of portable account mode.
+   - Define migration path to DB-backed auth (SQLite/Postgres + real signup/login).
 
 ## Key Design Decisions
 - WebSocket signaling is JSON messages with explicit `type` fields.

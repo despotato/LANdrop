@@ -60,6 +60,7 @@ export function getWsClient(): ClientHandle {
 
 export function createWsClient(opts: WsClientOptions): ClientHandle {
   const ws = new WebSocket(opts.url);
+  let closedByClient = false;
   let openResolve: (() => void) | null = null;
   const openPromise = new Promise<void>((resolve) => (openResolve = resolve));
 
@@ -134,11 +135,16 @@ export function createWsClient(opts: WsClientOptions): ClientHandle {
     }
   });
 
-  ws.addEventListener("close", () => opts.onError("Signaling disconnected"));
+  ws.addEventListener("close", () => {
+    if (!closedByClient) opts.onError("Signaling disconnected");
+  });
   ws.addEventListener("error", () => opts.onError("Signaling error"));
 
   const handle: ClientHandle = {
-    close: () => ws.close(),
+    close: () => {
+      closedByClient = true;
+      ws.close();
+    },
     pairCreate: async () => {
       await openPromise;
       return await new Promise<PairResult>((resolve) => {

@@ -151,12 +151,16 @@ export default function App() {
   }, [deviceName]);
 
   useEffect(() => {
-    authRequiredRef.current = authInfo?.authRequired ?? false;
-  }, [authInfo]);
+    authRequiredRef.current = authInfo?.authRequired ?? serverAuthRequired;
+  }, [authInfo, serverAuthRequired]);
 
   useEffect(() => {
     authTokenRef.current = authToken;
   }, [authToken]);
+
+  useEffect(() => {
+    setAuthInfo((prev) => (prev ? { ...prev, authRequired: serverAuthRequired } : { authRequired: serverAuthRequired }));
+  }, [serverAuthRequired]);
 
   useEffect(() => {
     if (!identity || !signalingUrl) return;
@@ -217,13 +221,21 @@ export default function App() {
     };
   }, [identity, authToken, signalingUrl, serverAuthRequired, findable]);
 
+  useEffect(() => {
+    if (!serverAuthRequired || authToken) return;
+    setPresence([]);
+    void disconnect();
+  }, [serverAuthRequired, authToken]);
+
   const peerChoices = useMemo(() => Object.values(trustedPeers), [trustedPeers]);
+  const authRequired = authInfo?.authRequired ?? serverAuthRequired;
+  const canDirectConnectFromPresence = authRequired && !!authToken;
   const connectChoices = useMemo(() => {
-    if (authInfo?.authRequired && authToken) {
+    if (authRequired && authToken) {
       return presence.filter((d) => d.deviceId !== identity?.deviceId && d.online && d.findable);
     }
     return peerChoices.map((p) => ({ deviceId: p.deviceId, name: p.name, online: true }));
-  }, [authInfo?.authRequired, authToken, presence, peerChoices, identity?.deviceId]);
+  }, [authRequired, authToken, presence, peerChoices, identity?.deviceId]);
 
   async function onCreatePairCode() {
     setWsError(null);
@@ -274,7 +286,6 @@ export default function App() {
             localStorage.setItem(storageKey("authToken"), res.sessionToken);
             setAuthToken(res.sessionToken);
             setAuthFlow(null);
-            window.location.reload();
             return;
           }
           // pending/slow_down/etc
@@ -291,26 +302,37 @@ export default function App() {
     };
   }, [authFlow]);
 
-  function logout() {
+  async function logout() {
+    await disconnect();
+    setPresence([]);
+    setWsError(null);
+    setAuthFlow(null);
     localStorage.removeItem(storageKey("authToken"));
     setAuthToken(null);
-    window.location.reload();
   }
 
   async function localDoLogin() {
     setWsError(null);
+    if (!localEmail.trim() || !localPassword) {
+      setWsError("Enter email and password.");
+      return;
+    }
     const token = await derivePortableLocalToken(localEmail, localPassword);
     localStorage.setItem(storageKey("authToken"), token);
     setAuthToken(token);
-    window.location.reload();
+    setLocalPassword("");
   }
 
   async function localDoSignup() {
     setWsError(null);
+    if (!localEmail.trim() || !localPassword) {
+      setWsError("Enter email and password.");
+      return;
+    }
     const token = await derivePortableLocalToken(localEmail, localPassword);
     localStorage.setItem(storageKey("authToken"), token);
     setAuthToken(token);
-    window.location.reload();
+    setLocalPassword("");
   }
 
   async function onTrustPeer() {
@@ -357,27 +379,46 @@ export default function App() {
     setActivePeerId(null);
   }
 
+  async function disconnectDevice(peerId: DeviceId) {
+    if (activePeerId !== peerId) return;
+    await disconnect();
+  }
+
+  async function forgetDevice(peerId: DeviceId) {
+    if (activePeerId === peerId) await disconnect();
+    const next = { ...trustedPeers };
+    delete next[peerId];
+    setTrustedPeers(next);
+    saveTrustedPeers(next);
+    if (selectedPeerId === peerId) setSelectedPeerId("");
+  }
+
   if (!identity) return <div className="wrap">Loading…</div>;
 
   const onlineOtherDevices = presence.filter((d) => d.deviceId !== identity.deviceId);
 
   return (
-    <div className="wrap">
-      <h2>LANdrop</h2>
+    <div className="wrap app-shell">
+      <header className="hero">
+        <h2>LANdrop</h2>
+        <p>Fast local transfer between your devices.</p>
+      </header>
 
       <div className="card">
         <h3>Account</h3>
         <div className="row">
-          <span className="pill">Auth: {authInfo?.authRequired ? "required" : "off"}</span>
+          <span className="pill">Auth: {authRequired ? "required" : "off"}</span>
           {serverAuthRequired && !authToken ? <span className="pill">Connect waits for sign-in</span> : null}
           {authToken ? (
             <>
               <span className="pill">Signed in</span>
-              <button onClick={logout}>Sign out</button>
+              <button className="btn btn-ghost" onClick={logout}>
+                Sign out
+              </button>
             </>
           ) : (
             <>
-              <button onClick={startLogin} disabled={!!authFlow}>
+              <button className="btn btn-primary" onClick={startLogin} disabled={!!authFlow}>
                 Sign in with Google
               </button>
               <input
@@ -393,8 +434,12 @@ export default function App() {
                 type="password"
                 style={{ minWidth: 220 }}
               />
-              <button onClick={localDoLogin}>Sign in</button>
-              <button onClick={localDoSignup}>Use this account</button>
+              <button className="btn btn-primary" onClick={localDoLogin}>
+                Sign in
+              </button>
+              <button className="btn" onClick={localDoSignup}>
+                Use this account
+              </button>
             </>
           )}
           <small className="muted">Signaling: {signalingUrl ?? "…"}</small>
@@ -405,8 +450,12 @@ export default function App() {
             <div className="row">
               <strong>Finish sign-in</strong>
               <span className="pill">Code: {authFlow.user_code}</span>
-              <button onClick={() => openLoginUrl(authFlow.verification_url)}>Open Google login</button>
-              <button onClick={() => setAuthFlow(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={() => openLoginUrl(authFlow.verification_url)}>
+                Open Google login
+              </button>
+              <button className="btn" onClick={() => setAuthFlow(null)}>
+                Cancel
+              </button>
             </div>
             <small className="muted">
               Enter the code in the browser window. This app will auto-detect when you finish.
@@ -465,7 +514,9 @@ export default function App() {
       {!findable ? <div className="card">
         <h3>Pairing (optional)</h3>
         <div className="row">
-          <button onClick={onCreatePairCode}>Create pairing code</button>
+          <button className="btn btn-primary" onClick={onCreatePairCode}>
+            Create pairing code
+          </button>
           {createdPairCode ? (
             <span>
               Code: <strong style={{ fontSize: 18 }}>{createdPairCode}</strong>
@@ -474,7 +525,9 @@ export default function App() {
         </div>
         <div className="row" style={{ marginTop: 10 }}>
           <input value={pairCode} onChange={(e) => setPairCode(e.target.value)} placeholder="Enter code" />
-          <button onClick={onJoinPairCode}>Join</button>
+          <button className="btn btn-primary" onClick={onJoinPairCode}>
+            Join
+          </button>
         </div>
 
         {pendingPeer ? (
@@ -487,8 +540,11 @@ export default function App() {
               <code>{safetyPhrase ?? "…"}</code>
             </p>
             <div className="row">
-              <button onClick={onTrustPeer}>Trust peer</button>
+              <button className="btn btn-primary" onClick={onTrustPeer}>
+                Trust peer
+              </button>
               <button
+                className="btn"
                 onClick={() => {
                   setPendingPeer(null);
                   setSafetyPhrase(null);
@@ -506,10 +562,59 @@ export default function App() {
 
       <div className="card">
         <h3>Presence</h3>
-        <ul>
+        <ul className="list">
           {onlineOtherDevices.map((d) => (
-            <li key={d.deviceId}>
-              {d.name} <small className="muted">({d.deviceId.slice(0, 8)})</small> {d.online ? "online" : "offline"}
+            <li className="list-item" key={d.deviceId}>
+              <span>
+                {d.name} <small className="muted">({d.deviceId.slice(0, 8)})</small> {d.online ? "online" : "offline"}
+              </span>
+              {canDirectConnectFromPresence
+                ? (activePeerId === d.deviceId ? (
+                    <button className="btn" style={{ marginLeft: 8 }} onClick={() => void disconnectDevice(d.deviceId)}>
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      style={{ marginLeft: 8 }}
+                      onClick={() => connectToPeer(d.deviceId)}
+                      disabled={!!pc}
+                    >
+                      Connect
+                    </button>
+                  ))
+                : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="card">
+        <h3>Saved Connections</h3>
+        {peerChoices.length === 0 ? <small className="muted">No saved devices yet.</small> : null}
+        <ul className="list">
+          {peerChoices.map((peer) => (
+            <li className="list-item" key={peer.deviceId}>
+              <span>
+                {peer.name} <small className="muted">({peer.deviceId.slice(0, 8)})</small>
+              </span>
+              {activePeerId === peer.deviceId ? (
+                <button className="btn" style={{ marginLeft: 8 }} onClick={() => void disconnectDevice(peer.deviceId)}>
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  style={{ marginLeft: 8 }}
+                  onClick={() => connectToPeer(peer.deviceId)}
+                  disabled={!!pc}
+                >
+                  Connect
+                </button>
+              )}
+              <button className="btn btn-danger" style={{ marginLeft: 8 }} onClick={() => void forgetDevice(peer.deviceId)}>
+                Forget
+              </button>
             </li>
           ))}
         </ul>
@@ -526,10 +631,14 @@ export default function App() {
               </option>
             ))}
           </select>
-          <button disabled={!selectedPeerId || !!pc} onClick={() => connectToPeer(selectedPeerId as DeviceId)}>
+          <button
+            className="btn btn-primary"
+            disabled={!selectedPeerId || !!pc}
+            onClick={() => connectToPeer(selectedPeerId as DeviceId)}
+          >
             Connect
           </button>
-          <button disabled={!pc} onClick={disconnect}>
+          <button className="btn" disabled={!pc} onClick={disconnect}>
             Disconnect
           </button>
           <span className="pill">Status: {dcStatus}</span>
@@ -591,7 +700,9 @@ function TransferUi({ transfer }: { transfer: TransferSession }) {
           }}
         />
         {activeFileId && (phase === "pending_accept" || phase === "sending" || phase === "receiving") ? (
-          <button onClick={() => transfer.cancelTransfer(activeFileId)}>Cancel Transfer</button>
+          <button className="btn" onClick={() => transfer.cancelTransfer(activeFileId)}>
+            Cancel Transfer
+          </button>
         ) : null}
       </div>
 
@@ -602,6 +713,7 @@ function TransferUi({ transfer }: { transfer: TransferSession }) {
           </div>
           <div className="row" style={{ marginTop: 8 }}>
             <button
+              className="btn btn-primary"
               onClick={() => {
                 transfer.acceptOffer(incomingOffer.fileId);
                 setIncomingOffer(null);
@@ -610,6 +722,7 @@ function TransferUi({ transfer }: { transfer: TransferSession }) {
               Accept
             </button>
             <button
+              className="btn"
               onClick={() => {
                 transfer.declineOffer(incomingOffer.fileId);
                 setIncomingOffer(null);
