@@ -1,9 +1,0 @@
-/Users/despotato/sendtoself/app/src-tauri/target/debug/deps/window_vibrancy-afef84de4be8b65c.d: /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/lib.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/mod.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/internal.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/ns_visual_effect_view_tagged.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/windows.rs
-
-/Users/despotato/sendtoself/app/src-tauri/target/debug/deps/libwindow_vibrancy-afef84de4be8b65c.rmeta: /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/lib.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/mod.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/internal.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/ns_visual_effect_view_tagged.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/windows.rs
-
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/lib.rs:
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/mod.rs:
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/internal.rs:
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/macos/ns_visual_effect_view_tagged.rs:
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/src/windows.rs:

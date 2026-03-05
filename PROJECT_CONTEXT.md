@@ -124,3 +124,11 @@ Goal: keep the UX “sign in once, see devices, send instantly” without introd
 
 ## Planning Docs
 App-first architecture plan rewrite lives at `docs/WEBRTC_SEND_PIPE_ARCH_PLAN_v2.md` and is exported to `docs/WEBRTC_SEND_PIPE_ARCH_PLAN_v2.pdf`.
+
+## Recent Changes (2026-03-05)
+- Repo size cleanup: untracked and removed Rust build artifacts from `app/src-tauri/target`.
+- Added ignore rule `app/src-tauri/target/` to prevent future large artifact commits.
+- Added GitHub Actions workflow at `.github/workflows/desktop-builds.yml`:
+  - On push: builds Windows + Linux desktop bundles and uploads workflow artifacts.
+  - On `v*` tag push: publishes a GitHub Release and auto-attaches built artifacts.
+- Documented local macOS build + CI release flow in `README.md`.

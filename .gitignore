@@ -6,4 +6,4 @@ dist
 *.log
 .turbo
 .vite
-
+app/src-tauri/target/

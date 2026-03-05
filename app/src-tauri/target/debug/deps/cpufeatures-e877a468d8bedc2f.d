@@ -1,8 +1,0 @@
-/Users/despotato/sendtoself/app/src-tauri/target/debug/deps/cpufeatures-e877a468d8bedc2f.d: /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/lib.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/aarch64.rs
-
-/Users/despotato/sendtoself/app/src-tauri/target/debug/deps/libcpufeatures-e877a468d8bedc2f.rlib: /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/lib.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/aarch64.rs
-
-/Users/despotato/sendtoself/app/src-tauri/target/debug/deps/libcpufeatures-e877a468d8bedc2f.rmeta: /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/lib.rs /Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/aarch64.rs
-
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/lib.rs:
-/Users/despotato/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/src/aarch64.rs:

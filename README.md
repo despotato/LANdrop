@@ -48,6 +48,17 @@ Findable mode:
 npm run tauri:dev -w @landrop/app
 ```
 
+## Build + release flow
+
+- Build macOS locally:
+
+```bash
+npm run tauri:build -w @landrop/app
+```
+
+- Push to GitHub: CI builds Windows + Linux packages and uploads workflow artifacts automatically.
+- Push a tag like `v0.1.0`: CI also creates a GitHub Release and auto-attaches built assets.
+
 4) Pair two devices
 - Install/run the app on both machines.
 - On Device A: create a pairing code.
